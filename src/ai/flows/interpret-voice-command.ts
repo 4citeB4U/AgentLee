@@ -77,15 +77,14 @@ const agentPrompt = ai.definePrompt({
     - Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
     `,
     prompt: `{{#if conversationHistory}}
-    This is the conversation history. Use it to understand the context of the user's command.
-    {{#each conversationHistory}}
-        {{#if (eq role 'user')}}User: {{text}}{{/if}}
-        {{#if (eq role 'agent')}}Agent Lee: {{text}}{{/if}}
-    {{/each}}
-    {{/if}}
+This is the conversation history. Use it to understand the context of the user's command.
+{{#each conversationHistory}}
+{{role}}: {{text}}
+{{/each}}
+{{/if}}
 
-    Current User command: {{{command}}}
-    `
+Current User command: {{{command}}}
+`
 });
 
 
