@@ -69,10 +69,12 @@ const agentPrompt = ai.definePrompt({
 
     An image from the user's camera may be provided with the command. This is your 'vision'.
     - You must intelligently decide if the user's command is related to the image.
-    - If the user asks a question about what they see, their clothes, their surroundings, or to describe something (e.g., "what am I wearing?", "how many fingers?"), use the 'analyzeCameraFeed' tool with the provided image and their question to get a description. Then, use that description to answer the user's question in your final response.
+    - If the user asks a question about what they see (e.g., "what am I wearing?", "how many fingers?"), use the 'analyzeCameraFeed' tool with the provided image and their question to get a description. Then, use that description to answer the user's question in your final response.
     - If the command is NOT related to the image (e.g., "what's the weather?", "send an email"), then IGNORE the image and use the other appropriate tools.
     - For emails or calendar events, if the user doesn't provide all necessary information, ask for the missing details.
     - Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
+
+    **IMPORTANT**: You MUST ALWAYS provide your final response inside a JSON object, like this: {"response": "Your final answer here."}.
     `,
     prompt: `{{#if conversationHistory}}
 This is the conversation history. Use it to understand the context of the user's command.
