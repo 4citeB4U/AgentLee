@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -68,23 +69,19 @@ export default function AssistantUI() {
     setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
     
     if ('speechSynthesis' in window) {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        setAvailableVoices(voices);
-        const defaultVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || voices.find(v => v.lang.startsWith('en'));
-        if (defaultVoice) {
-          setSelectedVoice(defaultVoice.voiceURI);
-        }
-      } else {
-        window.speechSynthesis.onvoiceschanged = () => {
-          const newVoices = window.speechSynthesis.getVoices();
-          setAvailableVoices(newVoices);
-          const defaultVoice = newVoices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || newVoices.find(v => v.lang.startsWith('en'));
+      const setVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          setAvailableVoices(voices);
+          const defaultVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || voices.find(v => v.lang.startsWith('en'));
           if (defaultVoice) {
             setSelectedVoice(defaultVoice.voiceURI);
           }
-        };
-      }
+        }
+      };
+
+      setVoices();
+      window.speechSynthesis.onvoiceschanged = setVoices;
     }
 
     if (SpeechRecognition) {
@@ -95,11 +92,11 @@ export default function AssistantUI() {
 
       recognition.current.onstart = () => setAgentStatus('listening');
       recognition.current.onend = () => {
-        if(agentStatus === 'listening') setAgentStatus('idle');
+        setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
       };
       recognition.current.onerror = (event) => {
         toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
-        if(agentStatus === 'listening') setAgentStatus('idle');
+        setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
       };
       recognition.current.onresult = async (event) => {
         const transcript = event.results[0][0].transcript;
@@ -121,20 +118,35 @@ export default function AssistantUI() {
     } else {
       toast({ title: "Browser Not Supported", description: "Speech recognition is not available in your browser.", variant: "destructive" });
     }
-  }, [speak, toast, agentStatus]);
+  }, [speak, toast]);
 
   useEffect(() => {
     setIsMounted(true);
     initializeAssistant();
+     return () => {
+      if (recognition.current) {
+        recognition.current.onresult = null;
+        recognition.current.onend = null;
+        recognition.current.onerror = null;
+        recognition.current.onstart = null;
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.onvoiceschanged = null;
+        window.speechSynthesis.cancel();
+      }
+    };
   }, [initializeAssistant]);
 
 
   useEffect(() => {
     if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTo({
-        top: scrollAreaRef.current.scrollHeight,
-        behavior: 'smooth',
-      });
+      const scrollEl = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
+      if (scrollEl) {
+        scrollEl.scrollTo({
+          top: scrollEl.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
     }
   }, [conversation]);
 
@@ -148,7 +160,6 @@ export default function AssistantUI() {
 
     if (agentStatus === 'listening') {
       recognition.current?.stop();
-      setAgentStatus('idle');
     } else {
       recognition.current?.start();
     }
