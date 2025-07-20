@@ -94,7 +94,7 @@ export default function AssistantUI() {
 
   useEffect(() => {
     // This effect runs only once on mount to initialize everything.
-    const initialize = async () => {
+    const initialize = () => {
       // 1. Set initial agent message
       setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
 
@@ -120,8 +120,6 @@ export default function AssistantUI() {
           setAgentStatus('thinking');
 
           try {
-            // The `voice` state is now a dependency of the onresult handler
-            // so we pass the current value of `voice` from the component state.
             const currentVoice = voice;
             const response = await processVoiceCommand({ command: transcript, voice: currentVoice });
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
@@ -137,23 +135,6 @@ export default function AssistantUI() {
         recognition.current = rec;
       } else {
         toast({ title: "Browser Not Supported", description: "Speech recognition is not available in your browser.", variant: "destructive" });
-      }
-
-      // 3. Get Camera Permissions
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        setHasCameraPermission(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (error) {
-        console.error('Error accessing camera:', error);
-        setHasCameraPermission(false);
-        toast({
-          variant: 'destructive',
-          title: 'Camera Access Denied',
-          description: 'Please enable camera permissions to use the video feature.',
-        });
       }
       
       setIsMounted(true);
@@ -178,6 +159,32 @@ export default function AssistantUI() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array ensures this runs only once.
   
+    // Effect to get camera permissions, runs after mount
+    useEffect(() => {
+        if (!isMounted) return;
+
+        const getCameraPermission = async () => {
+            if (hasCameraPermission === true) return; // Already have permission
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                setHasCameraPermission(true);
+                if (videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                }
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                setHasCameraPermission(false);
+                toast({
+                    variant: 'destructive',
+                    title: 'Camera Access Denied',
+                    description: 'Please enable camera permissions to use the video feature.',
+                });
+            }
+        };
+
+        getCameraPermission();
+    }, [isMounted, hasCameraPermission, toast]);
+
   // A separate effect to update the voice for the recognition result handler
   useEffect(() => {
     if (recognition.current) {
