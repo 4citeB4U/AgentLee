@@ -65,64 +65,65 @@ export default function AssistantUI() {
   }, [availableVoices, selectedVoice, toast]);
 
 
-  const initializeAssistant = useCallback(() => {
-    setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
-    
-    if ('speechSynthesis' in window) {
-      const setVoices = () => {
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          setAvailableVoices(voices);
-          const defaultVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || voices.find(v => v.lang.startsWith('en'));
-          if (defaultVoice) {
-            setSelectedVoice(defaultVoice.voiceURI);
-          }
-        }
-      };
-
-      setVoices();
-      window.speechSynthesis.onvoiceschanged = setVoices;
-    }
-
-    if (SpeechRecognition) {
-      recognition.current = new SpeechRecognition();
-      recognition.current.continuous = false;
-      recognition.current.interimResults = false;
-      recognition.current.lang = 'en-US';
-
-      recognition.current.onstart = () => setAgentStatus('listening');
-      recognition.current.onend = () => {
-        setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
-      };
-      recognition.current.onerror = (event) => {
-        toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
-        setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
-      };
-      recognition.current.onresult = async (event) => {
-        const transcript = event.results[0][0].transcript;
-        setConversation(prev => [...prev, { role: 'user', text: transcript }]);
-        setAgentStatus('thinking');
-
-        try {
-          const response = await processVoiceCommand(transcript);
-          setConversation(prev => [...prev, { role: 'agent', text: response }]);
-          speak(response);
-        } catch (error) {
-          console.error(error);
-          const errorMsg = 'Sorry, I had trouble processing that.';
-          toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
-          setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
-          speak(errorMsg);
-        }
-      };
-    } else {
-      toast({ title: "Browser Not Supported", description: "Speech recognition is not available in your browser.", variant: "destructive" });
-    }
-  }, [speak, toast]);
-
   useEffect(() => {
+    const initializeAssistant = () => {
+      setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
+      
+      if ('speechSynthesis' in window) {
+        const setVoices = () => {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices.length > 0) {
+            setAvailableVoices(voices);
+            const defaultVoice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || voices.find(v => v.lang.startsWith('en'));
+            if (defaultVoice) {
+              setSelectedVoice(defaultVoice.voiceURI);
+            }
+          }
+        };
+
+        setVoices();
+        window.speechSynthesis.onvoiceschanged = setVoices;
+      }
+
+      if (SpeechRecognition) {
+        recognition.current = new SpeechRecognition();
+        recognition.current.continuous = false;
+        recognition.current.interimResults = false;
+        recognition.current.lang = 'en-US';
+
+        recognition.current.onstart = () => setAgentStatus('listening');
+        recognition.current.onend = () => {
+          setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
+        };
+        recognition.current.onerror = (event) => {
+          toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
+          setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
+        };
+        recognition.current.onresult = async (event) => {
+          const transcript = event.results[0][0].transcript;
+          setConversation(prev => [...prev, { role: 'user', text: transcript }]);
+          setAgentStatus('thinking');
+
+          try {
+            const response = await processVoiceCommand(transcript);
+            setConversation(prev => [...prev, { role: 'agent', text: response }]);
+            speak(response);
+          } catch (error) {
+            console.error(error);
+            const errorMsg = 'Sorry, I had trouble processing that.';
+            toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
+            setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
+            speak(errorMsg);
+          }
+        };
+      } else {
+        toast({ title: "Browser Not Supported", description: "Speech recognition is not available in your browser.", variant: "destructive" });
+      }
+    };
+    
     setIsMounted(true);
     initializeAssistant();
+
      return () => {
       if (recognition.current) {
         recognition.current.onresult = null;
@@ -135,7 +136,8 @@ export default function AssistantUI() {
         window.speechSynthesis.cancel();
       }
     };
-  }, [initializeAssistant]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speak, toast]);
 
 
   useEffect(() => {
