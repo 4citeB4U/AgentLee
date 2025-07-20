@@ -36,12 +36,18 @@ export default function AssistantUI() {
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  
+  // Use refs to hold state for stable useCallback
+  const availableVoicesRef = useRef(availableVoices);
+  availableVoicesRef.current = availableVoices;
+  const selectedVoiceRef = useRef(selectedVoice);
+  selectedVoiceRef.current = selectedVoice;
 
   const speak = useCallback((text: string) => {
     if (!text || typeof window === 'undefined') return;
     
     const utterance = new SpeechSynthesisUtterance(text);
-    const voice = availableVoices.find(v => v.voiceURI === selectedVoice);
+    const voice = availableVoicesRef.current.find(v => v.voiceURI === selectedVoiceRef.current);
     if (voice) {
       utterance.voice = voice;
     }
@@ -62,7 +68,7 @@ export default function AssistantUI() {
     };
     
     window.speechSynthesis.speak(utterance);
-  }, [availableVoices, selectedVoice, toast]);
+  }, [toast]);
 
 
   useEffect(() => {
@@ -82,7 +88,10 @@ export default function AssistantUI() {
         };
 
         setVoices();
-        window.speechSynthesis.onvoiceschanged = setVoices;
+        // onvoiceschanged can fire multiple times, so we check if voices are already loaded.
+        if (window.speechSynthesis.onvoiceschanged === null) {
+            window.speechSynthesis.onvoiceschanged = setVoices;
+        }
       }
 
       if (SpeechRecognition) {
@@ -137,7 +146,7 @@ export default function AssistantUI() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speak, toast]);
+  }, []);
 
 
   useEffect(() => {
