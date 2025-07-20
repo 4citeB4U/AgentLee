@@ -1,2 +1,2 @@
-// This file is no longer needed as the logic has been moved to the new Genkit flow.
-// It is being cleared to avoid confusion. It can be deleted.
+// This file is no longer needed as all AI logic has been moved to Genkit flows.
+// It is being cleared to avoid confusion and can be safely deleted.
