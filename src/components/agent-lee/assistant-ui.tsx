@@ -40,7 +40,6 @@ export default function AssistantUI() {
   const [conversation, setConversation] = useState<Message[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceOption>('sharon');
   const [isGroupMode, setIsGroupMode] = useState(false);
   const [currentSpeaker, setCurrentSpeaker] = useState<Speaker>(speakers[0]);
@@ -48,61 +47,46 @@ export default function AssistantUI() {
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const currentAudio = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
 
   const speak = useCallback((audioDataUrl: string | null) => {
+    if (currentAudio.current && !currentAudio.current.paused) {
+        currentAudio.current.pause();
+    }
+
     if (!audioDataUrl) {
       setAgentStatus('idle');
       return;
-    };
-    setAudioUrl(audioDataUrl);
-  }, []);
-  
-  useEffect(() => {
-    if (audioUrl && audioRef.current) {
-      const audioElement = audioRef.current;
-      
-      const playAudio = () => {
+    }
+    
+    const audio = new Audio(audioDataUrl);
+    currentAudio.current = audio;
+
+    audio.onplay = () => {
         setAgentStatus('speaking');
-        audioElement.play().catch(e => {
-            console.error("Audio play failed", e);
-            toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
-            setAgentStatus('idle');
-        });
-      };
+    };
 
-      const handleAudioEnd = () => {
+    audio.onended = () => {
         setAgentStatus('idle');
-        setAudioUrl(null);
-      };
-
-      const handleAudioError = (e: Event) => {
-        console.error('Audio playback error', e);
+        currentAudio.current = null;
+    };
+    
+    audio.onerror = (e) => {
+        console.error("Audio playback error:", e);
         toast({ title: "Speech Error", description: "Could not play audio response.", variant: "destructive" });
         setAgentStatus('idle');
-        setAudioUrl(null);
-      }
-      
-      audioElement.src = audioUrl;
-      
-      audioElement.addEventListener('canplaythrough', playAudio, { once: true });
-      audioElement.addEventListener('ended', handleAudioEnd, { once: true });
-      audioElement.addEventListener('error', handleAudioError, { once: true });
+        currentAudio.current = null;
+    };
 
-      return () => {
-        audioElement.removeEventListener('canplaythrough', playAudio);
-        audioElement.removeEventListener('ended', handleAudioEnd);
-        audioElement.removeEventListener('error', handleAudioError);
-        if (!audioElement.paused) {
-            audioElement.pause();
-            audioElement.currentTime = 0;
-        }
-        audioElement.src = "";
-      };
-    }
-  }, [audioUrl, toast]);
+    audio.play().catch(e => {
+        console.error("Audio play failed", e);
+        toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
+        setAgentStatus('idle');
+    });
 
+  }, [toast]);
+  
 
   useEffect(() => {
     const initialize = () => {
@@ -135,6 +119,9 @@ export default function AssistantUI() {
     return () => {
       if (recognition.current) {
         recognition.current.stop();
+      }
+      if (currentAudio.current) {
+        currentAudio.current.pause();
       }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -229,9 +216,9 @@ export default function AssistantUI() {
 
   const handleListenClick = () => {
     if (agentStatus === 'speaking') {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
+      if (currentAudio.current) {
+        currentAudio.current.pause();
+        currentAudio.current = null;
       }
       setAgentStatus('idle');
       return;
@@ -387,7 +374,6 @@ export default function AssistantUI() {
           </div>
         </div>
       </CardContent>
-      <audio ref={audioRef} className="hidden" />
     </Card>
   );
 }
