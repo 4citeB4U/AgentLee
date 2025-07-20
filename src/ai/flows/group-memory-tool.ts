@@ -6,16 +6,14 @@
  * This translates the logic from the user's Python script into TypeScript.
  *
  * - saveMessage - Saves a message to the group transcript and updates speaker memory.
- * - buildGroupPrompt - Builds a prompt with recent conversation history for the agent.
+ * - buildGroupTranscript - Builds a prompt with recent conversation history for the agent.
  */
 
 import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z } from 'zod';
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, setDoc, serverTimestamp, query, orderBy, limit, getDocs } from 'firebase/firestore';
 
-// Initialize Firebase Admin SDK for server-side operations
-// Note: This uses a simpler client-side initialization for demonstration.
 // In a production environment, you would use firebase-admin.
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -45,53 +43,66 @@ export const saveMessage = ai.defineTool({
     outputSchema: z.object({ success: z.boolean(), message: z.string() }),
 }, async (input) => {
     const { groupId, userId, speakerName, messageText } = input;
-    const groupRef = doc(store, GROUPS, groupId);
     
-    // 1. Save to group transcript
-    const transcriptRef = collection(groupRef, TRANSCRIPTS);
-    await addDoc(transcriptRef, {
-        timestamp: serverTimestamp(),
-        speaker: speakerName,
-        text: messageText,
-    });
+    try {
+        const groupRef = doc(store, GROUPS, groupId);
+        
+        // 1. Save to group transcript
+        const transcriptRef = collection(groupRef, TRANSCRIPTS);
+        await addDoc(transcriptRef, {
+            timestamp: serverTimestamp(),
+            speaker: speakerName,
+            text: messageText,
+        });
 
-    // 2. Save/update speaker-specific memory
-    const memberRef = doc(groupRef, MEMBERS, userId);
-    await setDoc(memberRef, {
-        name: speakerName,
-        last_spoke: serverTimestamp(),
-        last_question: messageText,
-    }, { merge: true });
+        // 2. Save/update speaker-specific memory
+        const memberRef = doc(groupRef, MEMBERS, userId);
+        await setDoc(memberRef, {
+            name: speakerName,
+            last_spoke: serverTimestamp(),
+            last_question: messageText,
+        }, { merge: true });
 
-    return { success: true, message: `Message from ${speakerName} saved.` };
+        console.log(`[🔥 Firestore] Memory saved for ${speakerName}`);
+        return { success: true, message: `Message from ${speakerName} saved.` };
+
+    } catch (error: any) {
+        console.error("🔥 Error saving to Firestore:", error);
+        return { success: false, message: `Error: ${error.message || "Unknown error"}` };
+    }
 });
 
-const BuildGroupPromptInputSchema = z.object({
+const BuildGroupTranscriptInputSchema = z.object({
     groupId: z.string().describe("The ID of the group conversation to build the prompt for."),
 });
-export type BuildGroupPromptInput = z.infer<typeof BuildGroupPromptInputSchema>;
+export type BuildGroupTranscriptInput = z.infer<typeof BuildGroupTranscriptInputSchema>;
 
 
 export const buildGroupTranscript = ai.defineTool({
     name: 'buildGroupTranscript',
     description: 'Retrieves the recent transcript for a group conversation.',
-    inputSchema: BuildGroupPromptInputSchema,
+    inputSchema: BuildGroupTranscriptInputSchema,
     outputSchema: z.string().describe("The recent conversation history as a formatted string."),
 }, async ({ groupId }) => {
-    const groupRef = doc(store, GROUPS, groupId);
-    const transcriptQuery = query(collection(groupRef, TRANSCRIPTS), orderBy("timestamp", "desc"), limit(15));
-    
-    const snapshot = await getDocs(transcriptQuery);
-    const transcript = snapshot.docs.map(doc => doc.data() as { speaker: string, text: string });
+    try {
+        const groupRef = doc(store, GROUPS, groupId);
+        const transcriptQuery = query(collection(groupRef, TRANSCRIPTS), orderBy("timestamp", "desc"), limit(15));
+        
+        const snapshot = await getDocs(transcriptQuery);
+        const transcript = snapshot.docs.map(doc => doc.data() as { speaker: string, text: string });
 
-    if (transcript.length === 0) {
-        return "The conversation has just started.";
-    }
+        if (transcript.length === 0) {
+            return "The conversation has just started.";
+        }
 
-    let history = "Conversation History:\n";
-    for (const entry of transcript.reverse()) { // reverse to show oldest first
-        history += `${entry.speaker}: ${entry.text}\n`;
+        let history = "Conversation History:\n";
+        for (const entry of transcript.reverse()) { // reverse to show oldest first
+            history += `${entry.speaker}: ${entry.text}\n`;
+        }
+        
+        return history;
+    } catch (error: any) {
+        console.error("🔥 Error building transcript from Firestore:", error);
+        return `Error building transcript: ${error.message || "Unknown error"}`;
     }
-    
-    return history;
 });
