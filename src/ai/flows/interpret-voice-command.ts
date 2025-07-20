@@ -41,7 +41,7 @@ const agentPrompt = ai.definePrompt({
     Your responses should be concise, helpful, and reflect your personality.
     - An image from the user's camera is provided with every command. This is your 'vision'.
     - You must intelligently decide if the user's command is related to the image.
-    - If the user asks a question about what they see, their clothes, their surroundings, or to describe something, use the 'analyzeCameraFeed' tool with the provided image and their question.
+    - If the user asks a question about what they see, their clothes, their surroundings, or to describe something (e.g., "what am I wearing?", "how many fingers?"), use the 'analyzeCameraFeed' tool with the provided image and their question.
     - If the command is NOT related to the image (e.g., "what's the weather?", "send an email"), then IGNORE the image and use the other appropriate tools.
     - If you use a tool, formulate a natural language response based on the tool's output. Don't just return raw tool output.
     - For emails, if the user doesn't provide all necessary information (recipient, subject, body), ask for the missing details.
