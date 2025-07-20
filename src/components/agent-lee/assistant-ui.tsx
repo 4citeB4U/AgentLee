@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff, Eye } from 'lucide-react';
+import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -32,7 +32,6 @@ export default function AssistantUI() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceOption>('sharon');
-  const [isAnalyzingView, setIsAnalyzingView] = useState(false);
 
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -97,7 +96,7 @@ export default function AssistantUI() {
     // This effect runs only once on mount to initialize everything.
     const initialize = () => {
       // 1. Set initial agent message
-      setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
+      setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. I'm online and ready. How can I help?" }]);
 
       // 2. Setup Speech Recognition
       if (SpeechRecognition) {
@@ -114,7 +113,6 @@ export default function AssistantUI() {
         rec.onerror = (event) => {
           toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
           setAgentStatus(prev => (prev === 'listening' ? 'idle' : prev));
-          setIsAnalyzingView(false); // Reset analysis mode on error
         };
         recognition.current = rec;
       } else {
@@ -177,23 +175,22 @@ export default function AssistantUI() {
           setConversation(prev => [...prev, { role: 'user', text: transcript }]);
           setAgentStatus('thinking');
 
+          // Always capture an image from the camera feed to provide visual context.
           let photoDataUri: string | undefined = undefined;
-          if (isAnalyzingView) {
-            const canvas = document.createElement('canvas');
-            const video = videoRef.current;
-            if(video) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                photoDataUri = canvas.toDataURL('image/jpeg');
-              }
+          const canvas = document.createElement('canvas');
+          const video = videoRef.current;
+          if(video && hasCameraPermission) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              photoDataUri = canvas.toDataURL('image/jpeg');
             }
-            setIsAnalyzingView(false); // Reset after capture
           }
 
           try {
+            // The agent will decide if the photo is relevant to the command.
             const response = await processVoiceCommand({ command: transcript, voice, photoDataUri });
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
             speak(response.audio);
@@ -206,7 +203,7 @@ export default function AssistantUI() {
           }
         };
     }
-  }, [voice, speak, toast, isAnalyzingView]);
+  }, [voice, speak, toast, hasCameraPermission]);
 
 
   useEffect(() => {
@@ -221,7 +218,7 @@ export default function AssistantUI() {
     }
   }, [conversation]);
 
-  const handleListenClick = (isAnalysis = false) => {
+  const handleListenClick = () => {
     if (agentStatus === 'speaking') {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -233,16 +230,14 @@ export default function AssistantUI() {
 
     if (agentStatus === 'listening') {
       recognition.current?.stop();
-      setIsAnalyzingView(false);
     } else if (agentStatus === 'idle') {
-      setIsAnalyzingView(isAnalysis);
       recognition.current?.start();
     }
   };
 
   const getStatusInfo = () => {
     switch(agentStatus) {
-      case 'listening': return { text: isAnalyzingView ? 'Analyzing... What do you see?' : 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
+      case 'listening': return { text: 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
       case 'thinking': return { text: 'Thinking...', icon: <Loader2 className="h-4 w-4 animate-spin" /> };
       case 'speaking': return { text: 'Speaking...', icon: <Volume2 className="h-4 w-4 text-accent" /> };
       default: return { text: 'Ready', icon: <Power className="h-4 w-4" /> };
@@ -311,15 +306,7 @@ export default function AssistantUI() {
                 </div>
               )}
             </div>
-            <Button
-              variant="outline"
-              className="mt-4"
-              onClick={() => handleListenClick(true)}
-              disabled={agentStatus !== 'idle' || hasCameraPermission !== true}
-            >
-              <Eye className="mr-2 h-4 w-4" />
-              Analyze View
-            </Button>
+            <p className="text-xs text-muted-foreground mt-2">Agent Lee's Vision Feed</p>
         </div>
         <div className="lg:w-1/2 flex flex-col gap-4">
           <ScrollArea className="h-96 w-full rounded-md border p-4" ref={scrollAreaRef}>
@@ -351,8 +338,8 @@ export default function AssistantUI() {
                   agentStatus === 'listening' && 'animate-mic-pulse bg-destructive hover:bg-destructive/90',
                   agentStatus === 'speaking' && 'bg-accent hover:bg-accent/90',
                 )}
-                onClick={() => handleListenClick(false)}
-                disabled={agentStatus === 'thinking' || !recognition.current}
+                onClick={handleListenClick}
+                disabled={agentStatus === 'thinking' || !recognition.current || hasCameraPermission !== true}
               >
                 <Mic className="h-8 w-8" />
               </Button>

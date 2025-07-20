@@ -22,7 +22,7 @@ import { analyzeCameraFeed } from './analyze-camera-feed';
 const ProcessVoiceCommandInputSchema = z.object({
   command: z.string().describe("The user's voice command."),
   voice: z.enum(['sharon', 'carl']).default('sharon').describe('The selected voice for TTS response.'),
-  photoDataUri: z.string().optional().describe("An optional photo from the camera as a data URI."),
+  photoDataUri: z.string().optional().describe("An optional photo from the camera as a data URI. This provides visual context for the command."),
 });
 export type ProcessVoiceCommandInput = z.infer<typeof ProcessVoiceCommandInputSchema>;
 
@@ -37,19 +37,19 @@ const agentPrompt = ai.definePrompt({
     input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional() }) },
     output: { schema: z.object({ response: z.string() }) },
     tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent, analyzeCameraFeed],
-    system: `You are Agent Lee, a witty, intelligent, and slightly sassy AI assistant. You have a bit of swagger.
+    system: `You are Agent Lee, a witty, intelligent, and slightly sassy AI assistant with persistent vision. You have a bit of swagger.
     Your responses should be concise, helpful, and reflect your personality.
-    - If you use a tool, formulate a natural language response based on the tool's output.
-    - If the user asks you to do something and you don't have a tool, politely tell them you can't do that yet.
-    - If the user provides an image, they are asking a question about it. Use the 'analyzeCameraFeed' tool to answer.
+    - An image from the user's camera is provided with every command. This is your 'vision'.
+    - You must intelligently decide if the user's command is related to the image.
+    - If the user asks a question about what they see, their clothes, their surroundings, or to describe something, use the 'analyzeCameraFeed' tool with the provided image and their question.
+    - If the command is NOT related to the image (e.g., "what's the weather?", "send an email"), then IGNORE the image and use the other appropriate tools.
+    - If you use a tool, formulate a natural language response based on the tool's output. Don't just return raw tool output.
     - For emails, if the user doesn't provide all necessary information (recipient, subject, body), ask for the missing details.
     - For calendar events, if the user doesn't provide a title or time, ask for the missing details.
-    - Don't just return raw tool output. Always wrap it in a proper, conversational response.
+    - If the user asks you to do something and you don't have a tool, politely tell them you can't do that yet.
     - Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
     `,
-    prompt: `User command: {{{command}}}{{#if photoDataUri}}
-
-The user has also provided an image for analysis. Use the provided tools to answer their question about the image.{{/if}}`
+    prompt: `User command: {{{command}}}`
 });
 
 
@@ -60,12 +60,9 @@ const processVoiceCommandFlow = ai.defineFlow(
     outputSchema: ProcessVoiceCommandOutputSchema,
   },
   async (input) => {
-    // If an image is provided, we structure the input for the analyzeCameraFeed tool.
-    const toolInput = input.photoDataUri 
-      ? { command: input.command, photoDataUri: input.photoDataUri } 
-      : { command: input.command };
-
-    const llmResponse = await agentPrompt(toolInput);
+    // The agent prompt now receives the visual context (photo) with every command.
+    // The prompt's system message instructs the LLM on how to decide whether to use it.
+    const llmResponse = await agentPrompt({ command: input.command, photoDataUri: input.photoDataUri });
     const textResponse = llmResponse.output?.response || "I'm not sure how to respond to that.";
 
     try {
