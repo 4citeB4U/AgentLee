@@ -19,7 +19,7 @@ import {textToSpeech} from './text-to-speech';
 import { listCalendarEvents, createCalendarEvent } from './calendar-tool';
 import { analyzeCameraFeed } from './analyze-camera-feed';
 import { searchWeb } from './search-web';
-import { saveMessage, buildGroupPrompt } from './group-memory-tool';
+import { saveMessage, buildGroupTranscript } from './group-memory-tool';
 
 
 const ProcessVoiceCommandInputSchema = z.object({
@@ -46,7 +46,7 @@ export type ProcessVoiceCommandOutput = z.infer<typeof ProcessVoiceCommandOutput
 
 const agentPrompt = ai.definePrompt({
     name: 'agentLeePrompt',
-    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), groupContextPrompt: z.string().optional(), isGreeting: z.boolean().optional() }) },
+    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), groupTranscript: z.string().optional(), isGreeting: z.boolean().optional() }) },
     output: { schema: z.object({ response: z.string() }) },
     tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent, analyzeCameraFeed, searchWeb],
     model: 'googleai/gemini-2.0-flash',
@@ -80,9 +80,12 @@ Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long
 `,
     prompt: `{{#if isGreeting}}
 Respond with one phrase from your "hype" slang bank as an opening line.
-{{else if groupContextPrompt}}
-{{groupContextPrompt}}
-User command: {{{command}}}
+{{else if groupTranscript}}
+This is a group conversation. Here is the recent history:
+{{{groupTranscript}}}
+
+Your task is to respond to the last message from the current speaker based on the context.
+Current Speaker's Command: {{{command}}}
 {{else}}
 Current User command: {{{command}}}
 {{/if}}`
@@ -96,7 +99,7 @@ const processVoiceCommandFlow = ai.defineFlow(
     outputSchema: ProcessVoiceCommandOutputSchema,
   },
   async (input) => {
-    let groupContextPrompt: string | undefined = undefined;
+    let groupTranscript: string | undefined = undefined;
 
     // If this is a group conversation, save the message and build the context prompt
     if (input.isGroupConversation && input.groupId && input.userId && input.speakerName) {
@@ -106,13 +109,13 @@ const processVoiceCommandFlow = ai.defineFlow(
         speakerName: input.speakerName,
         messageText: input.command
       });
-      groupContextPrompt = await buildGroupPrompt({ groupId: input.groupId });
+      groupTranscript = await buildGroupTranscript({ groupId: input.groupId });
     }
 
     const llmResponse = await agentPrompt({ 
         command: input.command, 
         photoDataUri: input.photoDataUri,
-        groupContextPrompt,
+        groupTranscript,
         isGreeting: input.isGreeting
     });
     
@@ -138,4 +141,3 @@ const processVoiceCommandFlow = ai.defineFlow(
 export async function processVoiceCommand(input: ProcessVoiceCommandInput): Promise<ProcessVoiceCommandOutput> {
   return processVoiceCommandFlow(input);
 }
-

@@ -42,7 +42,7 @@ export const saveMessage = ai.defineTool({
     name: 'saveMessageToGroupMemory',
     description: "Saves a single message to a group's conversation transcript and updates the speaker's memory in Firestore.",
     inputSchema: SaveMessageInputSchema,
-    outputSchema: z.object({ success: z.boolean() }),
+    outputSchema: z.object({ success: z.boolean(), message: z.string() }),
 }, async (input) => {
     const { groupId, userId, speakerName, messageText } = input;
     const groupRef = doc(store, GROUPS, groupId);
@@ -63,7 +63,7 @@ export const saveMessage = ai.defineTool({
         last_question: messageText,
     }, { merge: true });
 
-    return { success: true };
+    return { success: true, message: `Message from ${speakerName} saved.` };
 });
 
 const BuildGroupPromptInputSchema = z.object({
@@ -72,11 +72,11 @@ const BuildGroupPromptInputSchema = z.object({
 export type BuildGroupPromptInput = z.infer<typeof BuildGroupPromptInputSchema>;
 
 
-export const buildGroupPrompt = ai.defineTool({
-    name: 'buildGroupContextPrompt',
-    description: 'Retrieves the recent transcript for a group and builds a context-aware prompt for the LLM.',
+export const buildGroupTranscript = ai.defineTool({
+    name: 'buildGroupTranscript',
+    description: 'Retrieves the recent transcript for a group conversation.',
     inputSchema: BuildGroupPromptInputSchema,
-    outputSchema: z.string().describe("The fully constructed prompt including conversation history."),
+    outputSchema: z.string().describe("The recent conversation history as a formatted string."),
 }, async ({ groupId }) => {
     const groupRef = doc(store, GROUPS, groupId);
     const transcriptQuery = query(collection(groupRef, TRANSCRIPTS), orderBy("timestamp", "desc"), limit(15));
@@ -84,11 +84,14 @@ export const buildGroupPrompt = ai.defineTool({
     const snapshot = await getDocs(transcriptQuery);
     const transcript = snapshot.docs.map(doc => doc.data() as { speaker: string, text: string });
 
-    let prompt = "You are in a group conversation. Respond naturally and helpfully to the last message, using the context from the recent transcript.\n\n--- Transcript ---\n";
-    for (const entry of transcript.reverse()) { // reverse to show oldest first
-        prompt += `${entry.speaker}: ${entry.text}\n`;
+    if (transcript.length === 0) {
+        return "The conversation has just started.";
     }
-    prompt += "--- End Transcript ---\n\nNow, respond to the most recent message.";
+
+    let history = "Conversation History:\n";
+    for (const entry of transcript.reverse()) { // reverse to show oldest first
+        history += `${entry.speaker}: ${entry.text}\n`;
+    }
     
-    return prompt;
+    return history;
 });
