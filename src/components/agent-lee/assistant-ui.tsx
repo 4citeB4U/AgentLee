@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff } from 'lucide-react';
+import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff, Eye } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -32,6 +32,7 @@ export default function AssistantUI() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceOption>('sharon');
+  const [isAnalyzingView, setIsAnalyzingView] = useState(false);
 
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -113,24 +114,7 @@ export default function AssistantUI() {
         rec.onerror = (event) => {
           toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
           setAgentStatus(prev => (prev === 'listening' ? 'idle' : prev));
-        };
-        rec.onresult = async (event) => {
-          const transcript = event.results[0][0].transcript;
-          setConversation(prev => [...prev, { role: 'user', text: transcript }]);
-          setAgentStatus('thinking');
-
-          try {
-            const currentVoice = voice;
-            const response = await processVoiceCommand({ command: transcript, voice: currentVoice });
-            setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
-            speak(response.audio);
-          } catch (error) {
-            console.error(error);
-            const errorMsg = 'Sorry, I had trouble processing that.';
-            toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
-            setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
-            setAgentStatus('idle');
-          }
+          setIsAnalyzingView(false); // Reset analysis mode on error
         };
         recognition.current = rec;
       } else {
@@ -193,8 +177,24 @@ export default function AssistantUI() {
           setConversation(prev => [...prev, { role: 'user', text: transcript }]);
           setAgentStatus('thinking');
 
+          let photoDataUri: string | undefined = undefined;
+          if (isAnalyzingView) {
+            const canvas = document.createElement('canvas');
+            const video = videoRef.current;
+            if(video) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                photoDataUri = canvas.toDataURL('image/jpeg');
+              }
+            }
+            setIsAnalyzingView(false); // Reset after capture
+          }
+
           try {
-            const response = await processVoiceCommand({ command: transcript, voice });
+            const response = await processVoiceCommand({ command: transcript, voice, photoDataUri });
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
             speak(response.audio);
           } catch (error) {
@@ -206,7 +206,7 @@ export default function AssistantUI() {
           }
         };
     }
-  }, [voice, speak, toast]);
+  }, [voice, speak, toast, isAnalyzingView]);
 
 
   useEffect(() => {
@@ -221,7 +221,7 @@ export default function AssistantUI() {
     }
   }, [conversation]);
 
-  const handleListenClick = () => {
+  const handleListenClick = (isAnalysis = false) => {
     if (agentStatus === 'speaking') {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -233,14 +233,16 @@ export default function AssistantUI() {
 
     if (agentStatus === 'listening') {
       recognition.current?.stop();
+      setIsAnalyzingView(false);
     } else if (agentStatus === 'idle') {
+      setIsAnalyzingView(isAnalysis);
       recognition.current?.start();
     }
   };
 
   const getStatusInfo = () => {
     switch(agentStatus) {
-      case 'listening': return { text: 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
+      case 'listening': return { text: isAnalyzingView ? 'Analyzing... What do you see?' : 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
       case 'thinking': return { text: 'Thinking...', icon: <Loader2 className="h-4 w-4 animate-spin" /> };
       case 'speaking': return { text: 'Speaking...', icon: <Volume2 className="h-4 w-4 text-accent" /> };
       default: return { text: 'Ready', icon: <Power className="h-4 w-4" /> };
@@ -309,6 +311,15 @@ export default function AssistantUI() {
                 </div>
               )}
             </div>
+            <Button
+              variant="outline"
+              className="mt-4"
+              onClick={() => handleListenClick(true)}
+              disabled={agentStatus !== 'idle' || hasCameraPermission !== true}
+            >
+              <Eye className="mr-2 h-4 w-4" />
+              Analyze View
+            </Button>
         </div>
         <div className="lg:w-1/2 flex flex-col gap-4">
           <ScrollArea className="h-96 w-full rounded-md border p-4" ref={scrollAreaRef}>
@@ -340,7 +351,7 @@ export default function AssistantUI() {
                   agentStatus === 'listening' && 'animate-mic-pulse bg-destructive hover:bg-destructive/90',
                   agentStatus === 'speaking' && 'bg-accent hover:bg-accent/90',
                 )}
-                onClick={handleListenClick}
+                onClick={() => handleListenClick(false)}
                 disabled={agentStatus === 'thinking' || !recognition.current}
               >
                 <Mic className="h-8 w-8" />
