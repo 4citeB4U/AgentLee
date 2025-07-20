@@ -1,46 +1,77 @@
 'use server';
 
 /**
- * @fileOverview Interprets voice commands using Google Gemini.
+ * @fileOverview Main Genkit flow for Agent Lee.
+ * This flow interprets a user's command, uses tools if necessary,
+ * and generates a natural language response.
  *
- * - interpretVoiceCommand - A function that interprets voice commands.
- * - InterpretVoiceCommandInput - The input type for the interpretVoiceCommand function.
- * - InterpretVoiceCommandOutput - The return type for the interpretVoiceCommand function.
+ * - processVoiceCommand - The primary function to handle user commands.
+ * - ProcessVoiceCommandInput - The input type for the flow.
+ * - ProcessVoiceCommandOutput - The return type for the flow.
  */
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import {getWeather} from './get-weather-information';
+import {composeAndSendEmail} from './compose-email';
+import {textToSpeech} from './text-to-speech';
 
-const InterpretVoiceCommandInputSchema = z.object({
-  voiceCommand: z.string().describe('The voice command to interpret.'),
+const ProcessVoiceCommandInputSchema = z.object({
+  command: z.string().describe("The user's voice command."),
+  voice: z.enum(['sharon', 'carl']).default('sharon').describe('The selected voice for TTS response.'),
 });
-export type InterpretVoiceCommandInput = z.infer<typeof InterpretVoiceCommandInputSchema>;
+export type ProcessVoiceCommandInput = z.infer<typeof ProcessVoiceCommandInputSchema>;
 
-const InterpretVoiceCommandOutputSchema = z.object({
-  intent: z.string().describe('The intent of the voice command.'),
-  action: z.string().describe('The action to take based on the voice command.'),
+const ProcessVoiceCommandOutputSchema = z.object({
+  text: z.string().describe('The text response from the agent.'),
+  audio: z.string().nullable().describe("The generated audio as a data URI. Can be null if TTS fails."),
 });
-export type InterpretVoiceCommandOutput = z.infer<typeof InterpretVoiceCommandOutputSchema>;
+export type ProcessVoiceCommandOutput = z.infer<typeof ProcessVoiceCommandOutputSchema>;
 
-export async function interpretVoiceCommand(input: InterpretVoiceCommandInput): Promise<InterpretVoiceCommandOutput> {
-  return interpretVoiceCommandFlow(input);
-}
-
-const prompt = ai.definePrompt({
-  name: 'interpretVoiceCommandPrompt',
-  input: {schema: InterpretVoiceCommandInputSchema},
-  output: {schema: InterpretVoiceCommandOutputSchema},
-  prompt: `You are Agent Lee, a helpful AI assistant.  Please interpret the following voice command and determine the intent and action to take.\n\nVoice Command: {{{voiceCommand}}}`,
+const agentPrompt = ai.definePrompt({
+    name: 'agentLeePrompt',
+    input: { schema: z.object({ command: z.string() }) },
+    output: { schema: z.object({ response: z.string() }) },
+    tools: [getWeather, composeAndSendEmail],
+    system: `You are Agent Lee, a witty, intelligent, and slightly sassy AI assistant. You have a bit of swagger.
+    Your responses should be concise, helpful, and reflect your personality.
+    - If you use a tool, formulate a natural language response based on the tool's output.
+    - If the user asks you to do something and you don't have a tool, politely tell them you can't do that yet.
+    - For emails, if the user doesn't provide all necessary information (recipient, subject, body), ask for the missing details.
+    - Don't just return raw tool output. Always wrap it in a proper, conversational response.
+    `,
+    prompt: `User command: {{{command}}}`
 });
 
-const interpretVoiceCommandFlow = ai.defineFlow(
+
+const processVoiceCommandFlow = ai.defineFlow(
   {
-    name: 'interpretVoiceCommandFlow',
-    inputSchema: InterpretVoiceCommandInputSchema,
-    outputSchema: InterpretVoiceCommandOutputSchema,
+    name: 'processVoiceCommandFlow',
+    inputSchema: ProcessVoiceCommandInputSchema,
+    outputSchema: ProcessVoiceCommandOutputSchema,
   },
-  async input => {
-    const {output} = await prompt(input);
-    return output!;
+  async (input) => {
+    const llmResponse = await agentPrompt(input);
+    const textResponse = llmResponse.output?.response || "I'm not sure how to respond to that.";
+
+    try {
+      const ttsResult = await textToSpeech({ textToSpeak: textResponse, voice: input.voice });
+      return {
+        text: textResponse,
+        audio: ttsResult.audioDataUri,
+      };
+    } catch (error) {
+        console.error("Error in TTS generation:", error);
+        // Return text response even if TTS fails
+        return {
+            text: textResponse,
+            audio: null
+        }
+    }
   }
 );
+
+
+export async function processVoiceCommand(input: ProcessVoiceCommandInput): Promise<ProcessVoiceCommandOutput> {
+  return processVoiceCommandFlow(input);
+}

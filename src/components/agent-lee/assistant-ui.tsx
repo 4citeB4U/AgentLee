@@ -2,16 +2,17 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Mic, Settings, User, Loader2, Volume2, Power, Video, CameraOff } from 'lucide-react';
+import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { processVoiceCommand } from '@/lib/actions';
+import { processVoiceCommand } from '@/ai/flows/interpret-voice-command';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '../ui/separator';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Label } from '../ui/label';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 
 type Message = {
   role: 'user' | 'agent';
@@ -19,6 +20,7 @@ type Message = {
 };
 
 type AgentStatus = 'idle' | 'listening' | 'thinking' | 'speaking';
+type VoiceOption = 'sharon' | 'carl';
 
 const SpeechRecognition =
   typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
@@ -27,9 +29,9 @@ export default function AssistantUI() {
   const [isMounted, setIsMounted] = useState(false);
   const [conversation, setConversation] = useState<Message[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [voice, setVoice] = useState<VoiceOption>('sharon');
 
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -37,12 +39,12 @@ export default function AssistantUI() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const { toast } = useToast();
 
-  const speak = useCallback((text: string, audioDataUrl: string) => {
-    if (!text || !audioDataUrl) return;
-
+  const speak = useCallback((audioDataUrl: string | null) => {
+    if (!audioDataUrl) {
+      setAgentStatus('idle');
+      return;
+    };
     setAudioUrl(audioDataUrl);
-
-    // The audio element will auto-play due to the useEffect hook below
   }, []);
   
   useEffect(() => {
@@ -51,13 +53,15 @@ export default function AssistantUI() {
       
       const playAudio = () => {
         setAgentStatus('speaking');
-        setIsSpeaking(true);
-        audioElement.play().catch(e => console.error("Audio play failed", e));
+        audioElement.play().catch(e => {
+            console.error("Audio play failed", e);
+            toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
+            setAgentStatus('idle');
+        });
       };
 
       const handleAudioEnd = () => {
         setAgentStatus('idle');
-        setIsSpeaking(false);
         setAudioUrl(null);
       };
 
@@ -65,23 +69,23 @@ export default function AssistantUI() {
         console.error('Audio playback error', e);
         toast({ title: "Speech Error", description: "Could not play audio response.", variant: "destructive" });
         setAgentStatus('idle');
-        setIsSpeaking(false);
         setAudioUrl(null);
       }
       
       audioElement.src = audioUrl;
       
-      // Add event listeners
       audioElement.addEventListener('canplaythrough', playAudio, { once: true });
       audioElement.addEventListener('ended', handleAudioEnd, { once: true });
       audioElement.addEventListener('error', handleAudioError, { once: true });
 
-      // Cleanup function
       return () => {
         audioElement.removeEventListener('canplaythrough', playAudio);
         audioElement.removeEventListener('ended', handleAudioEnd);
         audioElement.removeEventListener('error', handleAudioError);
-        audioElement.pause();
+        if (!audioElement.paused) {
+            audioElement.pause();
+            audioElement.currentTime = 0;
+        }
         audioElement.src = "";
       };
     }
@@ -112,16 +116,15 @@ export default function AssistantUI() {
           setAgentStatus('thinking');
 
           try {
-            const response = await processVoiceCommand(transcript);
+            const response = await processVoiceCommand({command: transcript, voice});
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
-            if (response.audio) {
-              speak(response.text, response.audio);
-            }
+            speak(response.audio);
           } catch (error) {
             console.error(error);
             const errorMsg = 'Sorry, I had trouble processing that.';
             toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
             setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
+            setAgentStatus('idle');
           }
         };
       } else {
@@ -165,7 +168,7 @@ export default function AssistantUI() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [voice]);
 
 
   useEffect(() => {
@@ -181,27 +184,27 @@ export default function AssistantUI() {
   }, [conversation]);
 
   const handleListenClick = () => {
-    if (isSpeaking) {
+    if (agentStatus === 'speaking') {
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.currentTime = 0;
       }
-      setIsSpeaking(false);
       setAgentStatus('idle');
       return;
     }
 
     if (agentStatus === 'listening') {
       recognition.current?.stop();
-    } else {
+    } else if (agentStatus === 'idle') {
       recognition.current?.start();
     }
   };
 
   const getStatusInfo = () => {
     switch(agentStatus) {
-      case 'listening': return { text: 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse" /> };
+      case 'listening': return { text: 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
       case 'thinking': return { text: 'Thinking...', icon: <Loader2 className="h-4 w-4 animate-spin" /> };
-      case 'speaking': return { text: 'Speaking...', icon: <Volume2 className="h-4 w-4" /> };
+      case 'speaking': return { text: 'Speaking...', icon: <Volume2 className="h-4 w-4 text-accent" /> };
       default: return { text: 'Ready', icon: <Power className="h-4 w-4" /> };
     }
   };
@@ -212,7 +215,7 @@ export default function AssistantUI() {
   }
   
   return (
-    <Card className="w-full max-w-4xl shadow-2xl">
+    <Card className="w-full max-w-4xl shadow-2xl bg-card/80 backdrop-blur-sm">
       <CardHeader className="text-center">
         <div className="flex justify-between items-center">
           <div className="w-12"></div>
@@ -235,7 +238,17 @@ export default function AssistantUI() {
                   </p>
                 </div>
                 <Separator />
-                 <p className="text-sm text-muted-foreground">No settings available yet.</p>
+                <RadioGroup value={voice} onValueChange={(value) => setVoice(value as VoiceOption)}>
+                  <Label>Voice</Label>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="sharon" id="sharon" />
+                    <Label htmlFor="sharon">Sharon (Female)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="carl" id="carl" />
+                    <Label htmlFor="carl">Carl (Male)</Label>
+                  </div>
+                </RadioGroup>
               </div>
             </PopoverContent>
           </Popover>
@@ -270,7 +283,7 @@ export default function AssistantUI() {
                     </div>
                   )}
                   <div className={cn('p-3 rounded-xl max-w-[80%] shadow-md', msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-card')}>
-                    <p className="text-sm">{msg.text}</p>
+                    <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                   </div>
                   {msg.role === 'user' && (
                     <div className="p-2 rounded-full bg-secondary">
@@ -287,7 +300,7 @@ export default function AssistantUI() {
                 className={cn(
                   'h-20 w-20 rounded-full shadow-lg transition-all duration-300',
                   agentStatus === 'listening' && 'animate-mic-pulse bg-destructive hover:bg-destructive/90',
-                  isSpeaking && 'bg-accent hover:bg-accent/90',
+                  agentStatus === 'speaking' && 'bg-accent hover:bg-accent/90',
                 )}
                 onClick={handleListenClick}
                 disabled={agentStatus === 'thinking'}
@@ -305,5 +318,3 @@ export default function AssistantUI() {
     </Card>
   );
 }
-
-    

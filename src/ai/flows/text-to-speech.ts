@@ -14,6 +14,7 @@ import wav from 'wav';
 
 const TextToSpeechInputSchema = z.object({
   textToSpeak: z.string().describe('The text to be converted to speech.'),
+  voice: z.enum(['sharon', 'carl']).default('sharon').describe('The voice to use for the speech.'),
 });
 export type TextToSpeechInput = z.infer<typeof TextToSpeechInputSchema>;
 
@@ -66,14 +67,17 @@ const textToSpeechFlow = ai.defineFlow(
     inputSchema: TextToSpeechInputSchema,
     outputSchema: TextToSpeechOutputSchema,
   },
-  async ({ textToSpeak }) => {
+  async ({ textToSpeak, voice }) => {
+    // Map friendly voice names to Gemini voice names
+    const voiceName = voice === 'sharon' ? 'Algenib' : 'Achernar';
+
     const { media } = await ai.generate({
       model: 'googleai/gemini-2.5-flash-preview-tts',
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Algenib' }, // A pleasant, professional voice
+            prebuiltVoiceConfig: { voiceName },
           },
         },
       },
@@ -97,5 +101,3 @@ const textToSpeechFlow = ai.defineFlow(
     };
   }
 );
-
-    

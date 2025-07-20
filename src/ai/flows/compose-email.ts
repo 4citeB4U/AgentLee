@@ -1,52 +1,31 @@
-// src/ai/flows/compose-email.ts
 'use server';
 
 /**
- * @fileOverview An email composition AI agent.
+ * @fileOverview An AI tool for composing and "sending" emails.
  *
- * - composeEmail - A function that handles the email composition process.
- * - ComposeEmailInput - The input type for the composeEmail function.
- * - ComposeEmailOutput - The return type for the composeEmail function.
+ * This file defines the 'composeAndSendEmail' tool, which can be used by a
+ * Genkit flow to draft an email to a recipient with a given subject and body.
  */
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
-const ComposeEmailInputSchema = z.object({
-  instructions: z.string().describe('Instructions for composing the email.'),
-  recipient: z.string().describe('The recipient email address.'),
+export const composeAndSendEmail = ai.defineTool({
+    name: 'composeAndSendEmail',
+    description: 'Composes and sends an email. The user must provide the recipient, subject, and body.',
+    inputSchema: z.object({
+        recipient: z.string().describe("The recipient's email address."),
+        subject: z.string().describe('The subject of the email.'),
+        body: z.string().describe('The content of the email body.'),
+    }),
+    outputSchema: z.string(),
+},
+async (input) => {
+    // In a real application, this would integrate with an email service (e.g., SendGrid, Nodemailer).
+    // For this demo, we'll just log the action and return a success message.
+    console.log(`Composing email to: ${input.recipient}`);
+    console.log(`Subject: ${input.subject}`);
+    console.log(`Body: ${input.body}`);
+    
+    return `Successfully composed an email to ${input.recipient} with the subject "${input.subject}".`;
 });
-export type ComposeEmailInput = z.infer<typeof ComposeEmailInputSchema>;
-
-const ComposeEmailOutputSchema = z.object({
-  subject: z.string().describe('The subject of the email.'),
-  body: z.string().describe('The body of the email.'),
-});
-export type ComposeEmailOutput = z.infer<typeof ComposeEmailOutputSchema>;
-
-export async function composeEmail(input: ComposeEmailInput): Promise<ComposeEmailOutput> {
-  return composeEmailFlow(input);
-}
-
-const prompt = ai.definePrompt({
-  name: 'composeEmailPrompt',
-  input: {schema: ComposeEmailInputSchema},
-  output: {schema: ComposeEmailOutputSchema},
-  prompt: `You are an AI email assistant.  Please compose an email based on the
-following instructions, and return the subject and body.  The email should be
-sent to {{recipient}}.
-
-Instructions: {{{instructions}}}`,
-});
-
-const composeEmailFlow = ai.defineFlow(
-  {
-    name: 'composeEmailFlow',
-    inputSchema: ComposeEmailInputSchema,
-    outputSchema: ComposeEmailOutputSchema,
-  },
-  async input => {
-    const {output} = await prompt(input);
-    return output!;
-  }
-);
