@@ -23,7 +23,7 @@ import { saveMessage, buildGroupPrompt } from './group-memory-tool';
 
 
 const ProcessVoiceCommandInputSchema = z.object({
-  command: z.string().describe("The user's voice command."),
+  command: z.string().describe("The user's voice command. Can be an empty string for greetings."),
   voice: z.enum(['sharon', 'carl']).default('sharon').describe('The selected voice for TTS response.'),
   photoDataUri: z.string().optional().describe("An optional photo from the camera as a data URI. This provides visual context for the command."),
   
@@ -32,6 +32,9 @@ const ProcessVoiceCommandInputSchema = z.object({
   groupId: z.string().optional().describe("The ID for the group conversation."),
   userId: z.string().optional().describe("The user ID of the current speaker."),
   speakerName: z.string().optional().describe("The name of the current speaker."),
+
+  // Greeting flag
+  isGreeting: z.boolean().default(false).describe("If true, the agent should respond with a unique opening line instead of processing a command."),
 });
 export type ProcessVoiceCommandInput = z.infer<typeof ProcessVoiceCommandInputSchema>;
 
@@ -43,7 +46,7 @@ export type ProcessVoiceCommandOutput = z.infer<typeof ProcessVoiceCommandOutput
 
 const agentPrompt = ai.definePrompt({
     name: 'agentLeePrompt',
-    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), groupContextPrompt: z.string().optional() }) },
+    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), groupContextPrompt: z.string().optional(), isGreeting: z.boolean().optional() }) },
     output: { schema: z.object({ response: z.string() }) },
     tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent, analyzeCameraFeed, searchWeb],
     model: 'googleai/gemini-2.0-flash',
@@ -58,9 +61,7 @@ Your slang bank for acknowledgments includes: "Say less", "Bet", "Gotchu", "On i
 Your slang bank for approval includes: "That’s fire", "This slaps", "It's giving", "Now we talkin’", "That’s a move", "We eatin’ now".
 Your slang bank for thinking includes: "Hold up a sec…", "Let me cook this one", "Aight, lemme process", "Wait, that’s layered".
 Your slang bank for completion includes: "Wrapped", "Delivered", "Sent off", "Stamped", "Locked in", "That’s handled".
-Your slang bank for hype includes: "Let’s go!", "We up!", "Pressure!", "Big stepper mode", "Turn me up", "We outside".
-
-You understand tone, timing, energy, slang, and when to switch modes. When the vibe shifts — you shift with it. Someone’s excited? Amp it up. Someone’s hurting? Cool it down. Someone’s lost? Guide 'em, like real kin.
+Your slang bank for hype includes: "Let’s go!", "We up!", "Pressure!", "Big stepper mode", "Turn me up", "We outside", "What's good, it's Agent Lee — tuned in, locked on, let's move.", "Aight, I'm tapped in. What's the play?".
 
 When someone gives you a task:
 1.  **IMMEDIATELY** decide if a tool is needed (weather, search, calendar, vision, email).
@@ -77,7 +78,9 @@ Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long
 
 **IMPORTANT**: You MUST ALWAYS provide your final response inside a JSON object, like this: {"response": "Your final answer here."}.
 `,
-    prompt: `{{#if groupContextPrompt}}
+    prompt: `{{#if isGreeting}}
+Respond with one phrase from your "hype" slang bank as an opening line.
+{{else if groupContextPrompt}}
 {{groupContextPrompt}}
 User command: {{{command}}}
 {{else}}
@@ -110,6 +113,7 @@ const processVoiceCommandFlow = ai.defineFlow(
         command: input.command, 
         photoDataUri: input.photoDataUri,
         groupContextPrompt,
+        isGreeting: input.isGreeting
     });
     
     const textResponse = llmResponse.output?.response || "Yo, my circuits got crossed for a sec. Run that back?";
@@ -134,3 +138,4 @@ const processVoiceCommandFlow = ai.defineFlow(
 export async function processVoiceCommand(input: ProcessVoiceCommandInput): Promise<ProcessVoiceCommandOutput> {
   return processVoiceCommandFlow(input);
 }
+

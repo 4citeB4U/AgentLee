@@ -38,7 +38,7 @@ const SpeechRecognition =
 export default function AssistantUI() {
   const [isMounted, setIsMounted] = useState(false);
   const [conversation, setConversation] = useState<Message[]>([]);
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>('thinking');
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [voice, setVoice] = useState<VoiceOption>('sharon');
   const [isGroupMode, setIsGroupMode] = useState(false);
@@ -89,8 +89,23 @@ export default function AssistantUI() {
   
 
   useEffect(() => {
-    const initialize = () => {
-      setConversation([{ role: 'agent', text: "What's good, it's Agent Lee — tuned in, locked on, let's move." }]);
+    const initialize = async () => {
+      // Get initial greeting from Agent Lee
+      try {
+        const response = await processVoiceCommand({
+            command: '',
+            voice,
+            isGreeting: true,
+        });
+        setConversation([{ role: 'agent', text: response.text }]);
+        speak(response.audio);
+      } catch (error) {
+        console.error(error);
+        const errorMsg = "Yo, my circuits got crossed on startup. Refresh maybe?";
+        toast({ title: "AI Error", description: "Could not get greeting from the agent.", variant: "destructive" });
+        setConversation([{ role: 'agent', text: errorMsg }]);
+        setAgentStatus('idle');
+      }
 
       if (SpeechRecognition) {
         const rec = new SpeechRecognition();
