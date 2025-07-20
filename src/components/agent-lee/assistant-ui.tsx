@@ -93,30 +93,37 @@ export default function AssistantUI() {
 
 
   useEffect(() => {
-    const initializeAssistant = () => {
+    // This effect runs only once on mount to initialize everything.
+    const initialize = async () => {
+      // 1. Set initial agent message
       setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. How can I assist you today?" }]);
 
+      // 2. Setup Speech Recognition
       if (SpeechRecognition) {
-        recognition.current = new SpeechRecognition();
-        recognition.current.continuous = false;
-        recognition.current.interimResults = false;
-        recognition.current.lang = 'en-US';
+        const rec = new SpeechRecognition();
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = 'en-US';
 
-        recognition.current.onstart = () => setAgentStatus('listening');
-        recognition.current.onend = () => {
-          setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
+        rec.onstart = () => setAgentStatus('listening');
+        rec.onend = () => {
+          // Check the status before setting to idle, so 'thinking' or 'speaking' is not interrupted
+          setAgentStatus(prev => (prev === 'listening' ? 'idle' : prev));
         };
-        recognition.current.onerror = (event) => {
+        rec.onerror = (event) => {
           toast({ title: "Recognition Error", description: event.error, variant: "destructive" });
-          setAgentStatus(prev => prev === 'listening' ? 'idle' : prev);
+          setAgentStatus(prev => (prev === 'listening' ? 'idle' : prev));
         };
-        recognition.current.onresult = async (event) => {
+        rec.onresult = async (event) => {
           const transcript = event.results[0][0].transcript;
           setConversation(prev => [...prev, { role: 'user', text: transcript }]);
           setAgentStatus('thinking');
 
           try {
-            const response = await processVoiceCommand({command: transcript, voice});
+            // The `voice` state is now a dependency of the onresult handler
+            // so we pass the current value of `voice` from the component state.
+            const currentVoice = voice;
+            const response = await processVoiceCommand({ command: transcript, voice: currentVoice });
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
             speak(response.audio);
           } catch (error) {
@@ -127,16 +134,15 @@ export default function AssistantUI() {
             setAgentStatus('idle');
           }
         };
+        recognition.current = rec;
       } else {
         toast({ title: "Browser Not Supported", description: "Speech recognition is not available in your browser.", variant: "destructive" });
       }
-    };
 
-    const getCameraPermission = async () => {
+      // 3. Get Camera Permissions
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         setHasCameraPermission(true);
-
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -149,18 +155,20 @@ export default function AssistantUI() {
           description: 'Please enable camera permissions to use the video feature.',
         });
       }
+      
+      setIsMounted(true);
     };
-    
-    setIsMounted(true);
-    initializeAssistant();
-    getCameraPermission();
 
-     return () => {
+    initialize();
+
+    // Cleanup function
+    return () => {
       if (recognition.current) {
         recognition.current.onresult = null;
         recognition.current.onend = null;
         recognition.current.onerror = null;
         recognition.current.onstart = null;
+        recognition.current.stop();
       }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -168,7 +176,30 @@ export default function AssistantUI() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voice]);
+  }, []); // Empty dependency array ensures this runs only once.
+  
+  // A separate effect to update the voice for the recognition result handler
+  useEffect(() => {
+    if (recognition.current) {
+        recognition.current.onresult = async (event) => {
+          const transcript = event.results[0][0].transcript;
+          setConversation(prev => [...prev, { role: 'user', text: transcript }]);
+          setAgentStatus('thinking');
+
+          try {
+            const response = await processVoiceCommand({ command: transcript, voice });
+            setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
+            speak(response.audio);
+          } catch (error) {
+            console.error(error);
+            const errorMsg = 'Sorry, I had trouble processing that.';
+            toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
+            setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
+            setAgentStatus('idle');
+          }
+        };
+    }
+  }, [voice, speak, toast]);
 
 
   useEffect(() => {
@@ -211,7 +242,7 @@ export default function AssistantUI() {
   const { text: statusText, icon: statusIcon } = getStatusInfo();
 
   if (!isMounted) {
-    return null;
+    return <div className="flex min-h-screen w-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
   }
   
   return (
@@ -303,7 +334,7 @@ export default function AssistantUI() {
                   agentStatus === 'speaking' && 'bg-accent hover:bg-accent/90',
                 )}
                 onClick={handleListenClick}
-                disabled={agentStatus === 'thinking'}
+                disabled={agentStatus === 'thinking' || !recognition.current}
               >
                 <Mic className="h-8 w-8" />
               </Button>

@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -15,6 +16,7 @@ import {z} from 'genkit';
 import {getWeather} from './get-weather-information';
 import {composeAndSendEmail} from './compose-email';
 import {textToSpeech} from './text-to-speech';
+import { listCalendarEvents, createCalendarEvent } from './calendar-tool';
 
 const ProcessVoiceCommandInputSchema = z.object({
   command: z.string().describe("The user's voice command."),
@@ -32,13 +34,15 @@ const agentPrompt = ai.definePrompt({
     name: 'agentLeePrompt',
     input: { schema: z.object({ command: z.string() }) },
     output: { schema: z.object({ response: z.string() }) },
-    tools: [getWeather, composeAndSendEmail],
+    tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent],
     system: `You are Agent Lee, a witty, intelligent, and slightly sassy AI assistant. You have a bit of swagger.
     Your responses should be concise, helpful, and reflect your personality.
     - If you use a tool, formulate a natural language response based on the tool's output.
     - If the user asks you to do something and you don't have a tool, politely tell them you can't do that yet.
     - For emails, if the user doesn't provide all necessary information (recipient, subject, body), ask for the missing details.
+    - For calendar events, if the user doesn't provide a title or time, ask for the missing details.
     - Don't just return raw tool output. Always wrap it in a proper, conversational response.
+    - Assume the current date is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
     `,
     prompt: `User command: {{{command}}}`
 });
