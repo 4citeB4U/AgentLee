@@ -102,7 +102,7 @@ const processVoiceCommandFlow = ai.defineFlow(
     let groupTranscript: string | undefined = undefined;
 
     // If this is a group conversation, save the message and build the context prompt
-    if (input.isGroupConversation && input.groupId && input.userId && input.speakerName) {
+    if (input.isGroupConversation && input.groupId && input.userId && input.speakerName && input.command) {
       await saveMessage({
         groupId: input.groupId,
         userId: input.userId,

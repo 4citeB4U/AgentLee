@@ -12,7 +12,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'zod';
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, setDoc, serverTimestamp, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, setDoc, serverTimestamp, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 
 // In a production environment, you would use firebase-admin.
 const firebaseConfig = {
@@ -20,6 +20,7 @@ const firebaseConfig = {
     authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
 };
+
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const store = getFirestore(app);
 
@@ -50,7 +51,7 @@ export const saveMessage = ai.defineTool({
         // 1. Save to group transcript
         const transcriptRef = collection(groupRef, TRANSCRIPTS);
         await addDoc(transcriptRef, {
-            timestamp: serverTimestamp(),
+            timestamp: Timestamp.now(),
             speaker: speakerName,
             text: messageText,
         });
@@ -59,7 +60,7 @@ export const saveMessage = ai.defineTool({
         const memberRef = doc(groupRef, MEMBERS, userId);
         await setDoc(memberRef, {
             name: speakerName,
-            last_spoke: serverTimestamp(),
+            last_spoke: Timestamp.now(),
             last_question: messageText,
         }, { merge: true });
 
