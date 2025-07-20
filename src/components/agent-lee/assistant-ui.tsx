@@ -49,44 +49,15 @@ export default function AssistantUI() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
-
-  const speak = useCallback((audioDataUrl: string | null) => {
-    if (currentAudio.current && !currentAudio.current.paused) {
-        currentAudio.current.pause();
-    }
-
-    if (!audioDataUrl) {
-      setAgentStatus('idle');
-      return;
-    }
-    
-    const audio = new Audio(audioDataUrl);
-    currentAudio.current = audio;
-
-    audio.onplay = () => {
-        setAgentStatus('speaking');
-    };
-
-    audio.onended = () => {
-        setAgentStatus('idle');
-        currentAudio.current = null;
-    };
-    
-    audio.onerror = (e) => {
-        console.error("Audio playback error:", e);
-        toast({ title: "Speech Error", description: "Could not play audio response.", variant: "destructive" });
-        setAgentStatus('idle');
-        currentAudio.current = null;
-    };
-
-    audio.play().catch(e => {
-        console.error("Audio play failed", e);
-        toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
-        setAgentStatus('idle');
-    });
-
-  }, [toast]);
   
+  const stopPlayback = () => {
+    if (currentAudio.current) {
+        currentAudio.current.pause();
+        currentAudio.current.src = "";
+        currentAudio.current = null;
+        setAgentStatus('idle');
+    }
+  }
 
   useEffect(() => {
     const initialize = async () => {
@@ -98,7 +69,30 @@ export default function AssistantUI() {
             isGreeting: true,
         });
         setConversation([{ role: 'agent', text: response.text }]);
-        speak(response.audio);
+        
+        if (response.audio) {
+            stopPlayback(); // Stop any currently playing audio
+            const audio = new Audio(response.audio);
+            currentAudio.current = audio;
+
+            audio.onplay = () => setAgentStatus('speaking');
+            audio.onended = () => {
+                setAgentStatus('idle');
+                currentAudio.current = null;
+            };
+            audio.onerror = () => {
+                toast({ title: "Speech Error", description: "Could not play audio response.", variant: "destructive" });
+                setAgentStatus('idle');
+                currentAudio.current = null;
+            };
+            audio.play().catch(() => {
+                toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
+                setAgentStatus('idle');
+            });
+        } else {
+             setAgentStatus('idle');
+        }
+
       } catch (error) {
         console.error(error);
         const errorMsg = "Yo, my circuits got crossed on startup. Refresh maybe?";
@@ -132,11 +126,9 @@ export default function AssistantUI() {
     initialize();
 
     return () => {
+      stopPlayback();
       if (recognition.current) {
         recognition.current.stop();
-      }
-      if (currentAudio.current) {
-        currentAudio.current.pause();
       }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -144,7 +136,7 @@ export default function AssistantUI() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, [voice]); // Re-initialize if voice changes
   
     useEffect(() => {
         if (!isMounted) return;
@@ -204,7 +196,30 @@ export default function AssistantUI() {
             });
             
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
-            speak(response.audio);
+            
+            if (response.audio) {
+                stopPlayback();
+                const audio = new Audio(response.audio);
+                currentAudio.current = audio;
+
+                audio.onplay = () => setAgentStatus('speaking');
+                audio.onended = () => {
+                    setAgentStatus('idle');
+                    currentAudio.current = null;
+                };
+                audio.onerror = () => {
+                    toast({ title: "Speech Error", description: "Could not play audio response.", variant: "destructive" });
+                    setAgentStatus('idle');
+                    currentAudio.current = null;
+                };
+                audio.play().catch(() => {
+                    toast({ title: "Playback Error", description: "Could not play audio. Please ensure browser audio is allowed.", variant: "destructive" });
+                    setAgentStatus('idle');
+                });
+            } else {
+                setAgentStatus('idle');
+            }
+
           } catch (error) {
             console.error(error);
             const errorMsg = "Yo, my circuits got crossed for a sec. Run that back?";
@@ -214,7 +229,7 @@ export default function AssistantUI() {
           }
         };
     }
-  }, [voice, speak, toast, hasCameraPermission, isGroupMode, currentSpeaker]);
+  }, [voice, toast, hasCameraPermission, isGroupMode, currentSpeaker]);
 
 
   useEffect(() => {
@@ -231,11 +246,7 @@ export default function AssistantUI() {
 
   const handleListenClick = () => {
     if (agentStatus === 'speaking') {
-      if (currentAudio.current) {
-        currentAudio.current.pause();
-        currentAudio.current = null;
-      }
-      setAgentStatus('idle');
+      stopPlayback();
       return;
     }
 
@@ -392,3 +403,5 @@ export default function AssistantUI() {
     </Card>
   );
 }
+
+  
