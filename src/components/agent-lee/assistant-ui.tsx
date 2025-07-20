@@ -96,7 +96,7 @@ export default function AssistantUI() {
     // This effect runs only once on mount to initialize everything.
     const initialize = () => {
       // 1. Set initial agent message
-      setConversation([{ role: 'agent', text: "Hello! I'm Agent Lee. I'm online and ready. How can I help?" }]);
+      setConversation([{ role: 'agent', text: "What's good, it's Agent Lee — tuned in, locked on, let's move." }]);
 
       // 2. Setup Speech Recognition
       if (SpeechRecognition) {
@@ -172,7 +172,9 @@ export default function AssistantUI() {
     if (recognition.current) {
         recognition.current.onresult = async (event) => {
           const transcript = event.results[0][0].transcript;
-          setConversation(prev => [...prev, { role: 'user', text: transcript }]);
+          
+          const currentConversation = [...conversation, { role: 'user', text: transcript }];
+          setConversation(currentConversation);
           setAgentStatus('thinking');
 
           // Always capture an image from the camera feed to provide visual context.
@@ -190,20 +192,22 @@ export default function AssistantUI() {
           }
 
           try {
-            // The agent will decide if the photo is relevant to the command.
-            const response = await processVoiceCommand({ command: transcript, voice, photoDataUri });
+            // Pass the entire conversation history (excluding the very first "hello" from agent)
+            const history = currentConversation.slice(1, -1);
+            const response = await processVoiceCommand({ command: transcript, voice, photoDataUri, conversationHistory: history });
+            
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
             speak(response.audio);
           } catch (error) {
             console.error(error);
-            const errorMsg = 'Sorry, I had trouble processing that.';
+            const errorMsg = "Yo, my circuits got crossed for a sec. Run that back?";
             toast({ title: "AI Error", description: "Could not get response from the agent.", variant: "destructive" });
             setConversation(prev => [...prev, { role: 'agent', text: errorMsg }]);
             setAgentStatus('idle');
           }
         };
     }
-  }, [voice, speak, toast, hasCameraPermission]);
+  }, [voice, speak, toast, hasCameraPermission, conversation]);
 
 
   useEffect(() => {
@@ -237,9 +241,9 @@ export default function AssistantUI() {
 
   const getStatusInfo = () => {
     switch(agentStatus) {
-      case 'listening': return { text: 'Listening...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
-      case 'thinking': return { text: 'Thinking...', icon: <Loader2 className="h-4 w-4 animate-spin" /> };
-      case 'speaking': return { text: 'Speaking...', icon: <Volume2 className="h-4 w-4 text-accent" /> };
+      case 'listening': return { text: 'Aight, I hear you...', icon: <Volume2 className="h-4 w-4 animate-pulse text-destructive" /> };
+      case 'thinking': return { text: 'Lemme cook...', icon: <Loader2 className="h-4 w-4 animate-spin" /> };
+      case 'speaking': return { text: 'Spittin\'...', icon: <Volume2 className="h-4 w-4 text-accent" /> };
       default: return { text: 'Ready', icon: <Power className="h-4 w-4" /> };
     }
   };

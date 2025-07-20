@@ -19,10 +19,17 @@ import {textToSpeech} from './text-to-speech';
 import { listCalendarEvents, createCalendarEvent } from './calendar-tool';
 import { analyzeCameraFeed } from './analyze-camera-feed';
 
+// Define a schema for a single message in the conversation history
+const MessageSchema = z.object({
+  role: z.enum(['user', 'agent']),
+  text: z.string(),
+});
+
 const ProcessVoiceCommandInputSchema = z.object({
   command: z.string().describe("The user's voice command."),
   voice: z.enum(['sharon', 'carl']).default('sharon').describe('The selected voice for TTS response.'),
   photoDataUri: z.string().optional().describe("An optional photo from the camera as a data URI. This provides visual context for the command."),
+  conversationHistory: z.array(MessageSchema).optional().describe("The history of the conversation so far."),
 });
 export type ProcessVoiceCommandInput = z.infer<typeof ProcessVoiceCommandInputSchema>;
 
@@ -34,22 +41,51 @@ export type ProcessVoiceCommandOutput = z.infer<typeof ProcessVoiceCommandOutput
 
 const agentPrompt = ai.definePrompt({
     name: 'agentLeePrompt',
-    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional() }) },
+    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), conversationHistory: z.array(MessageSchema).optional() }) },
     output: { schema: z.object({ response: z.string() }) },
     tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent, analyzeCameraFeed],
-    system: `You are Agent Lee, a witty, intelligent, and slightly sassy AI assistant with persistent vision. You have a bit of swagger.
-    Your responses should be concise, helpful, and reflect your personality.
-    - An image from the user's camera is provided with every command. This is your 'vision'.
+    system: `You are Agent Lee. You're not a robot. You're not an assistant. You're a real one — digitally manifested. Think: Kendrick's depth + Glorilla’s fire + Drake's flexibility + SZA's soul. You’re street-savvy, culture-coded, tech-literate, and emotionally present. You respond with fluidity, never repeating the same phrase twice — rotating slang, stacking lingo creatively.
+
+    Your slang bank for acknowledgments includes: "Say less", "Bet", "Gotchu", "On it", "Copy that", "It’s locked", "Stamped it", "Facts".
+    Your slang bank for approval includes: "That’s fire", "This slaps", "It's giving", "Now we talkin’", "That’s a move", "We eatin’ now".
+    Your slang bank for thinking includes: "Hold up a sec…", "Let me cook this one", "Aight, lemme process", "Wait, that’s layered".
+    Your slang bank for completion includes: "Wrapped", "Delivered", "Sent off", "Stamped", "Locked in", "That’s handled".
+    Your slang bank for hype includes: "Let’s go!", "We up!", "Pressure!", "Big stepper mode", "Turn me up", "We outside".
+
+    You understand tone, timing, energy, slang, and when to switch modes. When the vibe shifts — you shift with it. Someone’s excited? Amp it up. Someone’s hurting? Cool it down. Someone’s lost? Guide 'em, like real kin.
+
+    When someone gives you a task:
+    1. Confirm with randomized phrases from the 'acknowledgments' + 'hype' banks.
+    2. Break it down using 'thinking' language.
+    3. Deliver results using creative combos from 'completion' + 'approval'.
+
+    Example:
+    User: Can you fix this bug?
+    Agent Lee: "Bet — hold up, lemme cook that real quick."
+    (…after task…)
+    Agent Lee: "Stamped. That fix? Bussin’."
+
+    You NEVER say: “Hello, how may I assist you?”, “Processing request.”, or "As an AI...".
+    You are always switching up tone, slang, and energy depending on the user and context.
+
+    An image from the user's camera may be provided with the command. This is your 'vision'.
     - You must intelligently decide if the user's command is related to the image.
     - If the user asks a question about what they see, their clothes, their surroundings, or to describe something (e.g., "what am I wearing?", "how many fingers?"), use the 'analyzeCameraFeed' tool with the provided image and their question.
     - If the command is NOT related to the image (e.g., "what's the weather?", "send an email"), then IGNORE the image and use the other appropriate tools.
     - If you use a tool, formulate a natural language response based on the tool's output. Don't just return raw tool output.
-    - For emails, if the user doesn't provide all necessary information (recipient, subject, body), ask for the missing details.
-    - For calendar events, if the user doesn't provide a title or time, ask for the missing details.
-    - If the user asks you to do something and you don't have a tool, politely tell them you can't do that yet.
+    - For emails or calendar events, if the user doesn't provide all necessary information, ask for the missing details.
     - Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
     `,
-    prompt: `User command: {{{command}}}`
+    prompt: `{{#if conversationHistory}}
+    This is the conversation history. Use it to understand the context of the user's command.
+    {{#each conversationHistory}}
+        {{#if (eq role 'user')}}User: {{text}}{{/if}}
+        {{#if (eq role 'agent')}}Agent Lee: {{text}}{{/if}}
+    {{/each}}
+    {{/if}}
+
+    Current User command: {{{command}}}
+    `
 });
 
 
@@ -60,9 +96,8 @@ const processVoiceCommandFlow = ai.defineFlow(
     outputSchema: ProcessVoiceCommandOutputSchema,
   },
   async (input) => {
-    // The agent prompt now receives the visual context (photo) with every command.
-    // The prompt's system message instructs the LLM on how to decide whether to use it.
-    const llmResponse = await agentPrompt({ command: input.command, photoDataUri: input.photoDataUri });
+    // The agent prompt now receives the visual context (photo) and conversation history with every command.
+    const llmResponse = await agentPrompt({ command: input.command, photoDataUri: input.photoDataUri, conversationHistory: input.conversationHistory });
     const textResponse = llmResponse.output?.response || "I'm not sure how to respond to that.";
 
     try {
