@@ -36,7 +36,7 @@ async (input) => {
             { text: promptText },
             { media: { url: photoDataUri } },
         ],
-        model: 'googleai/gemini-2.0-flash'
+        model: 'googleai/gemini-pro-vision'
     });
 
     return llmResponse.text;
