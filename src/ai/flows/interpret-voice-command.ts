@@ -19,18 +19,19 @@ import {textToSpeech} from './text-to-speech';
 import { listCalendarEvents, createCalendarEvent } from './calendar-tool';
 import { analyzeCameraFeed } from './analyze-camera-feed';
 import { searchWeb } from './search-web';
+import { saveMessage, buildGroupPrompt } from './group-memory-tool';
 
-// Define a schema for a single message in the conversation history
-const MessageSchema = z.object({
-  role: z.enum(['user', 'agent']),
-  text: z.string(),
-});
 
 const ProcessVoiceCommandInputSchema = z.object({
   command: z.string().describe("The user's voice command."),
   voice: z.enum(['sharon', 'carl']).default('sharon').describe('The selected voice for TTS response.'),
   photoDataUri: z.string().optional().describe("An optional photo from the camera as a data URI. This provides visual context for the command."),
-  conversationHistory: z.array(MessageSchema).optional().describe("The history of the conversation so far."),
+  
+  // Group context fields
+  isGroupConversation: z.boolean().default(false),
+  groupId: z.string().optional().describe("The ID for the group conversation."),
+  userId: z.string().optional().describe("The user ID of the current speaker."),
+  speakerName: z.string().optional().describe("The name of the current speaker."),
 });
 export type ProcessVoiceCommandInput = z.infer<typeof ProcessVoiceCommandInputSchema>;
 
@@ -42,7 +43,7 @@ export type ProcessVoiceCommandOutput = z.infer<typeof ProcessVoiceCommandOutput
 
 const agentPrompt = ai.definePrompt({
     name: 'agentLeePrompt',
-    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), conversationHistory: z.array(MessageSchema).optional() }) },
+    input: { schema: z.object({ command: z.string(), photoDataUri: z.string().optional(), groupContextPrompt: z.string().optional() }) },
     output: { schema: z.object({ response: z.string() }) },
     tools: [getWeather, composeAndSendEmail, listCalendarEvents, createCalendarEvent, analyzeCameraFeed, searchWeb],
     model: 'googleai/gemini-2.0-flash',
@@ -70,30 +71,18 @@ When someone gives you a task:
 6.  For any other request (weather, email, calendar, web search), use the appropriate tool.
 7.  For emails or calendar events, if the user doesn't provide all necessary information, ask for the missing details.
 
-Example:
-User: "how many fingers am i holding up?"
-Agent Lee (Action): *Calls analyzeCameraFeed tool with the provided image.*
-Agent Lee (Response): "You rockin' with four fingers up. Stamped."
-
-User: "search for the latest sneaker drops"
-Agent Lee (Action): *Calls searchWeb tool.*
-Agent Lee (Response): "Bet. The latest heat dropping is the... That's a move."
-
 You NEVER say: "I can't do that", "I don't have the ability to...", "Hello, how may I assist you?”, “Processing request.”, or "As an AI...".
 You are always switching up tone, slang, and energy depending on the user and context.
 Assume the current date is ${new Date().toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} unless the user specifies otherwise.
 
 **IMPORTANT**: You MUST ALWAYS provide your final response inside a JSON object, like this: {"response": "Your final answer here."}.
 `,
-    prompt: `{{#if conversationHistory}}
-This is the conversation history. Use it to understand the context of the user's command.
-{{#each conversationHistory}}
-{{this.role}}: {{this.text}}
-{{/each}}
-{{/if}}
-
+    prompt: `{{#if groupContextPrompt}}
+{{groupContextPrompt}}
+User command: {{{command}}}
+{{else}}
 Current User command: {{{command}}}
-`
+{{/if}}`
 });
 
 
@@ -104,8 +93,25 @@ const processVoiceCommandFlow = ai.defineFlow(
     outputSchema: ProcessVoiceCommandOutputSchema,
   },
   async (input) => {
-    // The agent prompt now receives the visual context (photo) and conversation history with every command.
-    const llmResponse = await agentPrompt({ command: input.command, photoDataUri: input.photoDataUri, conversationHistory: input.conversationHistory });
+    let groupContextPrompt: string | undefined = undefined;
+
+    // If this is a group conversation, save the message and build the context prompt
+    if (input.isGroupConversation && input.groupId && input.userId && input.speakerName) {
+      await saveMessage({
+        groupId: input.groupId,
+        userId: input.userId,
+        speakerName: input.speakerName,
+        messageText: input.command
+      });
+      groupContextPrompt = await buildGroupPrompt({ groupId: input.groupId });
+    }
+
+    const llmResponse = await agentPrompt({ 
+        command: input.command, 
+        photoDataUri: input.photoDataUri,
+        groupContextPrompt,
+    });
+    
     const textResponse = llmResponse.output?.response || "Yo, my circuits got crossed for a sec. Run that back?";
 
     try {
@@ -116,7 +122,6 @@ const processVoiceCommandFlow = ai.defineFlow(
       };
     } catch (error) {
         console.error("Error in TTS generation:", error);
-        // Return text response even if TTS fails
         return {
             text: textResponse,
             audio: null

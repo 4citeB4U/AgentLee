@@ -9,3 +9,4 @@ import '@/ai/flows/analyze-camera-feed.ts';
 import '@/ai/flows/get-weather-information.ts';
 import '@/ai/flows/compose-email.ts';
 import '@/ai/flows/search-web.ts';
+import '@/ai/flows/group-memory-tool.ts';

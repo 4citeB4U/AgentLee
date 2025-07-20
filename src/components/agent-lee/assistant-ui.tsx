@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff } from 'lucide-react';
+import { Bot, Mic, Settings, User, Loader2, Volume2, Power, CameraOff, Users } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -13,14 +13,24 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '../ui/separator';
 import { Label } from '../ui/label';
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
+import { Switch } from '../ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 type Message = {
   role: 'user' | 'agent';
   text: string;
+  speaker?: string;
 };
 
 type AgentStatus = 'idle' | 'listening' | 'thinking' | 'speaking';
 type VoiceOption = 'sharon' | 'carl';
+type Speaker = { id: string; name: string };
+
+const speakers: Speaker[] = [
+    { id: 'user_tasha', name: 'Tasha' },
+    { id: 'user_jordan', name: 'Jordan' },
+    { id: 'user_casey', name: 'Casey' },
+];
 
 const SpeechRecognition =
   typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
@@ -32,6 +42,8 @@ export default function AssistantUI() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceOption>('sharon');
+  const [isGroupMode, setIsGroupMode] = useState(false);
+  const [currentSpeaker, setCurrentSpeaker] = useState<Speaker>(speakers[0]);
 
   const recognition = useRef<SpeechRecognition | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -93,12 +105,9 @@ export default function AssistantUI() {
 
 
   useEffect(() => {
-    // This effect runs only once on mount to initialize everything.
     const initialize = () => {
-      // 1. Set initial agent message
       setConversation([{ role: 'agent', text: "What's good, it's Agent Lee — tuned in, locked on, let's move." }]);
 
-      // 2. Setup Speech Recognition
       if (SpeechRecognition) {
         const rec = new SpeechRecognition();
         rec.continuous = false;
@@ -107,7 +116,6 @@ export default function AssistantUI() {
 
         rec.onstart = () => setAgentStatus('listening');
         rec.onend = () => {
-          // Check the status before setting to idle, so 'thinking' or 'speaking' is not interrupted
           setAgentStatus(prev => (prev === 'listening' ? 'idle' : prev));
         };
         rec.onerror = (event) => {
@@ -124,13 +132,8 @@ export default function AssistantUI() {
 
     initialize();
 
-    // Cleanup function
     return () => {
       if (recognition.current) {
-        recognition.current.onresult = null;
-        recognition.current.onend = null;
-        recognition.current.onerror = null;
-        recognition.current.onstart = null;
         recognition.current.stop();
       }
       if (videoRef.current && videoRef.current.srcObject) {
@@ -139,14 +142,13 @@ export default function AssistantUI() {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array ensures this runs only once.
+  }, []); 
   
-    // Effect to get camera permissions, runs after mount
     useEffect(() => {
         if (!isMounted) return;
 
         const getCameraPermission = async () => {
-            if (hasCameraPermission === true) return; // Already have permission
+            if (hasCameraPermission === true) return;
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 setHasCameraPermission(true);
@@ -167,17 +169,14 @@ export default function AssistantUI() {
         getCameraPermission();
     }, [isMounted, hasCameraPermission, toast]);
 
-  // A separate effect to update the voice for the recognition result handler
   useEffect(() => {
     if (recognition.current) {
         recognition.current.onresult = async (event) => {
           const transcript = event.results[0][0].transcript;
           
-          const currentConversation = [...conversation, { role: 'user', text: transcript }];
-          setConversation(currentConversation);
+          setConversation(prev => [...prev, { role: 'user', text: transcript, speaker: isGroupMode ? currentSpeaker.name : 'User' }]);
           setAgentStatus('thinking');
 
-          // Always capture an image from the camera feed to provide visual context.
           let photoDataUri: string | undefined = undefined;
           const canvas = document.createElement('canvas');
           const video = videoRef.current;
@@ -192,9 +191,15 @@ export default function AssistantUI() {
           }
 
           try {
-            // Pass the entire conversation history (excluding the very first "hello" from agent)
-            const history = currentConversation.slice(1, -1);
-            const response = await processVoiceCommand({ command: transcript, voice, photoDataUri, conversationHistory: history });
+            const response = await processVoiceCommand({ 
+                command: transcript, 
+                voice, 
+                photoDataUri,
+                isGroupConversation: isGroupMode,
+                groupId: isGroupMode ? 'weekly-sync' : undefined,
+                userId: isGroupMode ? currentSpeaker.id : 'solo_user',
+                speakerName: isGroupMode ? currentSpeaker.name : 'User'
+            });
             
             setConversation(prev => [...prev, { role: 'agent', text: response.text }]);
             speak(response.audio);
@@ -207,7 +212,7 @@ export default function AssistantUI() {
           }
         };
     }
-  }, [voice, speak, toast, hasCameraPermission, conversation]);
+  }, [voice, speak, toast, hasCameraPermission, isGroupMode, currentSpeaker]);
 
 
   useEffect(() => {
@@ -277,6 +282,33 @@ export default function AssistantUI() {
                   </p>
                 </div>
                 <Separator />
+                 <div className="flex items-center justify-between">
+                  <Label htmlFor="group-mode" className="flex items-center gap-2">
+                    <Users className="w-4 h-4" />
+                    Group Mode
+                  </Label>
+                  <Switch
+                    id="group-mode"
+                    checked={isGroupMode}
+                    onCheckedChange={setIsGroupMode}
+                  />
+                </div>
+                {isGroupMode && (
+                    <div className='grid gap-2'>
+                        <Label>Current Speaker</Label>
+                        <Select value={currentSpeaker.id} onValueChange={(id) => setCurrentSpeaker(speakers.find(s => s.id === id) || speakers[0])}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select speaker" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {speakers.map(speaker => (
+                                    <SelectItem key={speaker.id} value={speaker.id}>{speaker.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
+                <Separator />
                 <RadioGroup value={voice} onValueChange={(value) => setVoice(value as VoiceOption)}>
                   <Label>Voice</Label>
                   <div className="flex items-center space-x-2">
@@ -323,6 +355,7 @@ export default function AssistantUI() {
                     </div>
                   )}
                   <div className={cn('p-3 rounded-xl max-w-[80%] shadow-md', msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-card')}>
+                    {msg.role === 'user' && msg.speaker && <p className="text-xs font-bold text-primary-foreground/80 pb-1">{msg.speaker}</p>}
                     <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                   </div>
                   {msg.role === 'user' && (
