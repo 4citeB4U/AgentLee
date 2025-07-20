@@ -11,7 +11,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'zod';
-import { initializeApp, getApp, getApps } from 'firebase/app';
+import { initializeApp, getApp, getApps, FirebaseError } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, setDoc, serverTimestamp, query, orderBy, limit, getDocs, Timestamp } from 'firebase/firestore';
 
 // In a production environment, you would use firebase-admin.
@@ -21,8 +21,17 @@ const firebaseConfig = {
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const store = getFirestore(app);
+function getFirebaseApp() {
+    try {
+        if (getApps().length > 0) {
+            return getApp();
+        }
+        return initializeApp(firebaseConfig);
+    } catch (e) {
+        console.error("Failed to initialize Firebase", e);
+        return null;
+    }
+}
 
 const GROUPS = 'groups';
 const TRANSCRIPTS = 'transcript';
@@ -45,6 +54,14 @@ export const saveMessage = ai.defineTool({
 }, async (input) => {
     const { groupId, userId, speakerName, messageText } = input;
     
+    const app = getFirebaseApp();
+    if (!app) {
+        const errorMsg = "Firebase is not configured. Cannot save message.";
+        console.error(errorMsg);
+        return { success: false, message: errorMsg };
+    }
+    const store = getFirestore(app);
+
     try {
         const groupRef = doc(store, GROUPS, groupId);
         
@@ -69,7 +86,17 @@ export const saveMessage = ai.defineTool({
 
     } catch (error: any) {
         console.error("🔥 Error saving to Firestore:", error);
-        return { success: false, message: `Error: ${error.message || "Unknown error"}` };
+        let errorMessage = "An unknown error occurred while saving to Firestore.";
+        if (error instanceof FirebaseError) {
+            if (error.code === 'permission-denied') {
+                errorMessage = "Firestore permission denied. Check your security rules.";
+            } else {
+                errorMessage = `A Firestore error occurred: ${error.message}`;
+            }
+        } else if (error instanceof Error) {
+            errorMessage = `Error: ${error.message}`;
+        }
+        return { success: false, message: errorMessage };
     }
 });
 
@@ -85,6 +112,14 @@ export const buildGroupTranscript = ai.defineTool({
     inputSchema: BuildGroupTranscriptInputSchema,
     outputSchema: z.string().describe("The recent conversation history as a formatted string."),
 }, async ({ groupId }) => {
+    const app = getFirebaseApp();
+    if (!app) {
+        const errorMsg = "Firebase is not configured. Cannot build transcript.";
+        console.error(errorMsg);
+        return errorMsg;
+    }
+    const store = getFirestore(app);
+
     try {
         const groupRef = doc(store, GROUPS, groupId);
         const transcriptQuery = query(collection(groupRef, TRANSCRIPTS), orderBy("timestamp", "desc"), limit(15));
@@ -104,6 +139,16 @@ export const buildGroupTranscript = ai.defineTool({
         return history;
     } catch (error: any) {
         console.error("🔥 Error building transcript from Firestore:", error);
-        return `Error building transcript: ${error.message || "Unknown error"}`;
+         let errorMessage = "An unknown error occurred while building the transcript.";
+        if (error instanceof FirebaseError) {
+             if (error.code === 'permission-denied') {
+                errorMessage = "Firestore permission denied. Check your security rules.";
+            } else {
+                errorMessage = `A Firestore error occurred: ${error.message}`;
+            }
+        } else if (error instanceof Error) {
+            errorMessage = `Error building transcript: ${error.message}`;
+        }
+        return errorMessage;
     }
 });
