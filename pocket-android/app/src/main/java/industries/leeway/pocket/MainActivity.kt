@@ -6,7 +6,11 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.media.MediaRecorder
+import android.media.MediaPlayer
+import android.media.AudioManager
 import android.net.Uri
+import android.telecom.TelecomManager
+import android.telephony.TelephonyManager
 import android.os.*
 import android.provider.CalendarContract
 import android.speech.*
@@ -14,6 +18,9 @@ import android.speech.tts.*
 import android.view.*
 import android.widget.*
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
@@ -26,7 +33,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var memory: PocketMemory
     private var recognizer: SpeechRecognizer? = null
     private var recorder: MediaRecorder? = null
+    private var mediaPlayer: MediaPlayer? = null
     private var listening = false
+    private val liveBridge = "http://127.0.0.1:8770"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +43,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         window.navigationBarColor = Color.BLACK
         memory = PocketMemory(this)
         tts = TextToSpeech(this, this)
-        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA), 7)
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA, Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS), 7)
 
         val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         orb = LeeOrbView(this).apply {
@@ -47,6 +56,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         frame.addView(menu, FrameLayout.LayoutParams(88, 88, Gravity.TOP or Gravity.START).apply { topMargin = 30; leftMargin = 10 })
         setContentView(frame)
+
+        when (intent?.getStringExtra("leeway_action")) {
+            "ANSWER_CALL" -> Thread { answerRingingCall() }.start()
+            "LEEWAY_STATUS" -> Thread {
+                val text = liveRuntimeStatus()
+                runOnUiThread { say(text) }
+            }.start()
+        }
     }
 
     override fun onInit(code: Int) {
@@ -121,7 +138,118 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 startActivity(Intent("android.media.action.IMAGE_CAPTURE"))
             }
             l.contains("who are you") -> say("I'm Lee. Pocket edition. LeeWay in my bones, OG in my cadence. I'm here to think with you, remember what matters, and handle what I can from this phone.")
-            else -> say("Yeah, I hear you. The full reasoning model hookup is the next live gate, but your voice loop, memory, tools, and Pocket Lee shell are running.")
+            else -> {
+                Thread {
+                    askLiveLeeWay(q)
+                }.start()
+            }
+        }
+    }
+
+    private fun liveRuntimeStatus(): String {
+        return try {
+            val conn = (URL("$liveBridge/health").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"; connectTimeout = 5000; readTimeout = 8000
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val j = JSONObject(body)
+            val formula = j.optJSONObject("formula")
+            val skills = j.optJSONObject("agentSkills")
+            val model = j.optJSONObject("model")
+            val voice = j.optJSONObject("voice")
+            "LeeWay runtime is connected. Formula " +
+                formula?.optString("status", "unknown") +
+                ". Agent Skills " + skills?.optString("status", "unknown") +
+                ". Gemma 4 available " + model?.optBoolean("available", false) +
+                ". Clone voice loaded " + voice?.optBoolean("voice_loaded", false) + "."
+        } catch (e: Exception) {
+            "LeeWay live runtime bridge is unavailable: " + (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    private fun askLiveLeeWay(question: String) {
+        try {
+            runOnUiThread { orb.state = LeeState.THINKING }
+            val conn = (URL("$liveBridge/ask").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 8000
+                readTimeout = 180000
+                setRequestProperty("Content-Type", "application/json")
+            }
+            val payload = JSONObject().put("question", question).toString().toByteArray()
+            conn.outputStream.use { it.write(payload) }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val j = JSONObject(body)
+            val answer = j.optString("answer")
+            val audioUrl = j.optString("audio_url")
+            val receipt = j.optJSONObject("receipt")
+            memory.saveConversation("lee", answer)
+            memory.note("LeeWay turn receipt: " + (receipt?.toString() ?: "none"))
+            if (audioUrl.isNotBlank()) {
+                runOnUiThread { playCloneAudio(liveBridge + audioUrl, answer) }
+            } else {
+                runOnUiThread { say(answer.ifBlank { "LeeWay returned an empty answer." }) }
+            }
+        } catch (e: Exception) {
+            val detail = e.message ?: e.javaClass.simpleName
+            memory.note("LeeWay live turn failed: $detail")
+            runOnUiThread { say("The live LeeWay runtime turn failed: $detail") }
+        }
+    }
+
+    private fun playCloneAudio(url: String, answer: String) {
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer().apply {
+            setDataSource(url)
+            setOnPreparedListener {
+                orb.state = LeeState.SPEAKING
+                start()
+                listenForBargeIn()
+            }
+            setOnCompletionListener {
+                orb.state = LeeState.IDLE
+                release()
+                mediaPlayer = null
+                listen()
+            }
+            setOnErrorListener { _, what, extra ->
+                memory.note("Clone playback error what=$what extra=$extra")
+                orb.state = LeeState.IDLE
+                false
+            }
+            prepareAsync()
+        }
+    }
+
+    private fun callState(): Int {
+        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return -1
+        return try { getSystemService(TelephonyManager::class.java)?.callState ?: -1 } catch (_: SecurityException) { -1 }
+    }
+
+    private fun answerRingingCall() {
+        val state = callState()
+        if (state != TelephonyManager.CALL_STATE_RINGING) {
+            memory.note("Call answer requested with state=$state")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED) {
+            runOnUiThread {
+                requestPermissions(arrayOf(Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_PHONE_STATE), 41)
+            }
+            return
+        }
+        try {
+            @Suppress("DEPRECATION")
+            getSystemService(TelecomManager::class.java)?.acceptRingingCall()
+            val audio = getSystemService(AudioManager::class.java)
+            audio?.mode = AudioManager.MODE_IN_COMMUNICATION
+            @Suppress("DEPRECATION")
+            run { audio?.isSpeakerphoneOn = true }
+            memory.note("Agent Lee answered ringing call through owner-authorized TelecomManager.")
+            runOnUiThread { say("Agent Lee is on the call.") }
+        } catch (e: Exception) {
+            memory.note("Call answer failed: " + (e.message ?: e.javaClass.simpleName))
         }
     }
 
@@ -131,7 +259,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun showMenu() {
-        val items = arrayOf("Past conversations", "Saved personal memory", "Lee's notebook", "Create voice clone sample", "Talk to Lee", "Close")
+        val items = arrayOf("Past conversations", "Saved personal memory", "Lee's notebook", "Create voice clone sample", "Talk to Lee", "LeeWay runtime status", "Answer ringing call", "Close")
         AlertDialog.Builder(this).setTitle("LeeWay Pocket").setItems(items) { d, which ->
             when (which) {
                 0 -> showText("Past conversations", memory.conversations())
@@ -139,6 +267,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 2 -> showText("Lee's notebook", memory.notes())
                 3 -> recordVoiceSample()
                 4 -> listen()
+                5 -> Thread { val s = liveRuntimeStatus(); runOnUiThread { say(s) } }.start()
+                6 -> Thread { answerRingingCall() }.start()
                 else -> d.dismiss()
             }
         }.show()
@@ -165,7 +295,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .show()
     }
 
-    override fun onDestroy() { recognizer?.destroy(); recorder?.release(); tts.shutdown(); memory.close(); super.onDestroy() }
+    override fun onDestroy() { recognizer?.destroy(); recorder?.release(); mediaPlayer?.release(); tts.shutdown(); memory.close(); super.onDestroy() }
 }
 
 private class PocketMemory(ctx: Context) : android.database.sqlite.SQLiteOpenHelper(ctx, "leeway_personal_memory.db", null, 1) {
