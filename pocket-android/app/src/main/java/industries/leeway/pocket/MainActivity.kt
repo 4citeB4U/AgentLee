@@ -17,6 +17,7 @@ import android.speech.*
 import android.speech.tts.*
 import android.view.*
 import android.widget.*
+import android.util.Log
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -29,6 +30,7 @@ private enum class LeeState { IDLE, LISTENING, THINKING, RESEARCHING, SPEAKING, 
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var orb: LeeOrbView
+    private lateinit var statusView: TextView
     private lateinit var tts: TextToSpeech
     private lateinit var memory: PocketMemory
     private var recognizer: SpeechRecognizer? = null
@@ -50,6 +52,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { if (listening) stopListening() else listen() }
         }
         frame.addView(orb, FrameLayout.LayoutParams(-1, -1))
+        statusView = TextView(this).apply {
+            text = "LEEWAY LIVE · checking..."
+            textSize = 14f
+            setTextColor(Color.rgb(110,220,255))
+            gravity = Gravity.CENTER
+            setPadding(18, 12, 18, 12)
+        }
+        frame.addView(statusView, FrameLayout.LayoutParams(-1, 72, Gravity.BOTTOM).apply { bottomMargin = 36 })
         val menu = TextView(this).apply {
             text = "☰"; textSize = 32f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setPadding(24, 12, 24, 12); setOnClickListener { showMenu() }
@@ -57,12 +67,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         frame.addView(menu, FrameLayout.LayoutParams(88, 88, Gravity.TOP or Gravity.START).apply { topMargin = 30; leftMargin = 10 })
         setContentView(frame)
 
+        Thread {
+            val text = liveRuntimeStatus()
+            Log.i("LeeWayPocket", "runtime_status=$text")
+            runOnUiThread { statusView.text = text }
+        }.start()
+
         when (intent?.getStringExtra("leeway_action")) {
             "ANSWER_CALL" -> Thread { answerRingingCall() }.start()
             "LEEWAY_STATUS" -> Thread {
                 val text = liveRuntimeStatus()
-                runOnUiThread { say(text) }
+                Log.i("LeeWayPocket", "runtime_status_action=$text")
+                runOnUiThread { statusView.text = text }
             }.start()
+            "LEEWAY_ASK" -> {
+                val q = intent?.getStringExtra("leeway_question").orEmpty()
+                if (q.isNotBlank()) Thread { askLiveLeeWay(q) }.start()
+            }
         }
     }
 
@@ -92,13 +113,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onResults(b: Bundle?) {
                 listening = false
                 val s = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                Log.i("LeeWayPocket", "speech_final=$s")
+                runOnUiThread { statusView.text = if (s.isBlank()) "I didn't catch that." else "YOU · $s" }
                 if (s.isNotBlank()) handle(s) else orb.state = LeeState.IDLE
             }
             override fun onPartialResults(b: Bundle?) {
                 val s = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 if (barge && s.length > 2 && tts.isSpeaking) tts.stop()
             }
-            override fun onError(e: Int) { listening = false; if (!tts.isSpeaking) orb.state = LeeState.IDLE }
+            override fun onError(e: Int) {
+                listening = false
+                Log.w("LeeWayPocket", "speech_error=$e")
+                runOnUiThread { statusView.text = "MIC ERROR · $e" }
+                if (!tts.isSpeaking) orb.state = LeeState.IDLE
+            }
             override fun onBufferReceived(b: ByteArray?) {}; override fun onEndOfSpeech() {}
             override fun onEvent(t: Int, b: Bundle?) {}
         })
@@ -113,6 +141,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun handle(raw: String) {
         val q = raw.trim(); if (q.isBlank()) return
+        Log.i("LeeWayPocket", "handle=$q")
         memory.saveConversation("user", q)
         orb.state = LeeState.THINKING
         val l = q.lowercase(Locale.US)
@@ -169,7 +198,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun askLiveLeeWay(question: String) {
         try {
-            runOnUiThread { orb.state = LeeState.THINKING }
+            Log.i("LeeWayPocket", "live_turn_start=$question")
+            runOnUiThread { orb.state = LeeState.THINKING; statusView.text = "LEEWAY · Formula → Skills → Gemma 4" }
             val conn = (URL("$liveBridge/ask").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
@@ -186,6 +216,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val receipt = j.optJSONObject("receipt")
             memory.saveConversation("lee", answer)
             memory.note("LeeWay turn receipt: " + (receipt?.toString() ?: "none"))
+            Log.i("LeeWayPocket", "live_turn_answer=$answer")
+            Log.i("LeeWayPocket", "live_turn_receipt=" + (receipt?.toString() ?: "none"))
+            runOnUiThread { statusView.text = "AGENT LEE · clone response ready" }
             if (audioUrl.isNotBlank()) {
                 runOnUiThread { playCloneAudio(liveBridge + audioUrl, answer) }
             } else {
@@ -194,7 +227,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             val detail = e.message ?: e.javaClass.simpleName
             memory.note("LeeWay live turn failed: $detail")
-            runOnUiThread { say("The live LeeWay runtime turn failed: $detail") }
+            Log.e("LeeWayPocket", "live_turn_failed=$detail")
+            runOnUiThread { statusView.text = "LEEWAY ERROR · $detail"; say("The live LeeWay runtime turn failed: $detail") }
         }
     }
 
@@ -203,12 +237,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         mediaPlayer = MediaPlayer().apply {
             setDataSource(url)
             setOnPreparedListener {
+                Log.i("LeeWayPocket", "clone_playback_start=$url")
                 orb.state = LeeState.SPEAKING
+                statusView.text = "AGENT LEE · SPEAKING"
                 start()
                 listenForBargeIn()
             }
             setOnCompletionListener {
+                Log.i("LeeWayPocket", "clone_playback_complete")
                 orb.state = LeeState.IDLE
+                statusView.text = "LEEWAY LIVE · ready"
                 release()
                 mediaPlayer = null
                 listen()
