@@ -21,13 +21,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SDKROOT=/usr/local/lib/android/sdk
-          SDKMANAGER="$SDKROOT/cmdline-tools/16.0/bin/sdkmanager"
-          test -x "$SDKMANAGER"
+          SDKROOT="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDKROOT/cmdline-tools"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o "$RUNNER_TEMP/cmdline-tools.zip"
+          unzip -q "$RUNNER_TEMP/cmdline-tools.zip" -d "$RUNNER_TEMP/cmdline-tools-unpacked"
+          mv "$RUNNER_TEMP/cmdline-tools-unpacked/cmdline-tools" "$SDKROOT/cmdline-tools/latest"
+          SDKMANAGER="$SDKROOT/cmdline-tools/latest/bin/sdkmanager"
           echo "ANDROID_HOME=$SDKROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDKROOT" >> "$GITHUB_ENV"
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          yes | "$SDKMANAGER" --sdk_root="$SDKROOT" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDKROOT" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
